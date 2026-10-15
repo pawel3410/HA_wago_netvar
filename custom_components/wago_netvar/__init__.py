@@ -1,39 +1,87 @@
 import asyncio
 import logging
+import voluptuous as vol
 from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from .const import (
-    DOMAIN,
-    CONF_IP_ADDRESS,
-    CONF_PORT,
-    CONF_COB_ID,
-    CONF_VAR_COUNT,
-    CONF_BIG_ENDIAN,
-)
+import homeassistant.helpers.config_validation as cv
+from .const import DOMAIN, DEFAULT_PORT
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+SENSOR_SCHEMA = vol.Schema({
+    vol.Required("name"): cv.string,
+    vol.Required("byte_offset"): int,
+    vol.Required("size"): int,
+    vol.Required("var_type"): cv.string,
+    vol.Optional("device_class"): cv.string,
+    vol.Optional("state_class"): cv.string,
+    vol.Optional("unit_of_measurement"): cv.string,
+    vol.Optional("icon"): cv.string,
+})
+
+SWITCH_SCHEMA = vol.Schema({
+    vol.Required("name"): cv.string,
+    vol.Required("byte_offset"): int,
+    vol.Required("bit_offset"): int,
+    vol.Optional("device_class"): cv.string,
+    vol.Optional("icon"): cv.string,
+})
+
+NUMBER_SCHEMA = vol.Schema({
+    vol.Required("name"): cv.string,
+    vol.Required("byte_offset"): int,
+    vol.Required("var_type"): cv.string,
+    vol.Optional("min", default=0.0): vol.Coerce(float),
+    vol.Optional("max", default=100.0): vol.Coerce(float),
+    vol.Optional("step", default=1.0): vol.Coerce(float),
+    vol.Optional("device_class"): cv.string,
+    vol.Optional("unit_of_measurement"): cv.string,
+    vol.Optional("icon"): cv.string,
+})
+
+DEVICE_SCHEMA = vol.Schema({
+    vol.Required("ip_address"): cv.string,
+    vol.Optional("port", default=DEFAULT_PORT): int,
+    vol.Required("cob_id"): int,
+    vol.Optional("var_count", default=1): int,
+    vol.Optional("big_endian", default=True): bool,
+    vol.Optional("sensors", default=[]): vol.All(cv.ensure_list, [SENSOR_SCHEMA]),
+    vol.Optional("switches", default=[]): vol.All(cv.ensure_list, [SWITCH_SCHEMA]),
+    vol.Optional("numbers", default=[]): vol.All(cv.ensure_list, [NUMBER_SCHEMA]),
+})
+
+CONFIG_SCHEMA = vol.Schema({
+    DOMAIN: vol.All(cv.ensure_list, [DEVICE_SCHEMA])
+}, extra=vol.ALLOW_EXTRA)
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
     
-    ip_address = entry.data[CONF_IP_ADDRESS]
-    port = entry.data.get(CONF_PORT, 1202)
-    cob_id = entry.data[CONF_COB_ID]
-    var_count = entry.data.get(CONF_VAR_COUNT, 1)
-    big_endian = entry.data.get(CONF_BIG_ENDIAN, True)
+    if DOMAIN not in config:
+        return True
 
-    coordinator = NetVarCoordinator(hass, ip_address, port, cob_id, var_count, big_endian)
-    await coordinator.async_setup()
-    
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    for device_conf in config[DOMAIN]:
+        ip_address = device_conf["ip_address"]
+        port = device_conf["port"]
+        cob_id = device_conf["cob_id"]
+        var_count = device_conf["var_count"]
+        big_endian = device_conf["big_endian"]
 
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "number"])
+        coordinator = NetVarCoordinator(hass, ip_address, port, cob_id, var_count, big_endian)
+        await coordinator.async_setup()
+
+        hass.data[DOMAIN][cob_id] = {
+            "coordinator": coordinator,
+            "sensors": device_conf["sensors"],
+            "switches": device_conf["switches"],
+            "numbers": device_conf["numbers"],
+        }
+
+    for platform in ["sensor", "switch", "number"]:
+        hass.async_create_task(
+            hass.helpers.discovery.async_load_platform(platform, DOMAIN, {}, config)
+        )
+
     return True
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-    await coordinator.async_stop()
-    return await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "number"])
 
 class NetVarUDPProtocol(asyncio.DatagramProtocol):
     def __init__(self, callback):
@@ -66,7 +114,7 @@ class NetVarCoordinator:
             lambda: NetVarUDPProtocol(self._handle_packet),
             local_addr=('0.0.0.0', self.port)
         )
-        _LOGGER.info("NetVar UDP nasłuchuje na porcie %d (COB-ID: %d, Liczba zmiennych: %d)", self.port, self.cob_id, self.var_count)
+        _LOGGER.info("NetVar UDP nasłuchuje na porcie %d (COB-ID: %d)", self.port, self.cob_id)
 
     async def async_stop(self):
         if self.transport:
@@ -104,7 +152,6 @@ class NetVarCoordinator:
             self.tx_payload[offset + i] = b
 
     def send_frame(self):
-        """Wysyła ramkę UDP z liczbą zmiennych (var_count) na bajtach 12-13"""
         if not self.transport or not self.ip_address:
             return
         
@@ -116,7 +163,7 @@ class NetVarCoordinator:
         endian = "big" if self.big_endian else "little"
         
         header[8:10] = self.cob_id.to_bytes(2, endian)
-        header[12:14] = self.var_count.to_bytes(2, endian)  # <--- Liczba zmiennych w ramce (bajty 12-13)
+        header[12:14] = self.var_count.to_bytes(2, endian)
         header[14:16] = total_len.to_bytes(2, endian)
         header[16:18] = self.sequence_counter.to_bytes(2, endian)
         self.sequence_counter = (self.sequence_counter + 1) % 65536
