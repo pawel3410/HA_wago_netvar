@@ -10,14 +10,14 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
         return
 
     entities = []
-    for cob_id, data in hass.data[DOMAIN].items():
+    for list_id, data in hass.data[DOMAIN].items():
         coordinator = data["coordinator"]
         for sensor_conf in data["sensors"]:
             entities.append(
                 NetVarSensor(
                     coordinator=coordinator,
                     name=sensor_conf["name"],
-                    cob_id=cob_id,
+                    list_id=list_id,
                     byte_offset=sensor_conf["byte_offset"],
                     size=sensor_conf["size"],
                     var_type=sensor_conf["var_type"],
@@ -31,16 +31,16 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
     async_add_entities(entities)
 
 class NetVarSensor(SensorEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
-        self._cob_id = cob_id
+        self._list_id = list_id
         self._byte_offset = byte_offset
         self._size = size
         self._var_type = var_type
         
         self._attr_force_update = force_update
-        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
+        self._attr_unique_id = f"{DOMAIN}_{list_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_state_class = state_class
