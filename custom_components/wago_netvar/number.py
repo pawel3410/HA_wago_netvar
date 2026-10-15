@@ -10,14 +10,14 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
         return
 
     entities = []
-    for cob_id, data in hass.data[DOMAIN].items():
+    for list_id, data in hass.data[DOMAIN].items():
         coordinator = data["coordinator"]
         for num_conf in data["numbers"]:
             entities.append(
                 NetVarNumber(
                     coordinator=coordinator,
                     name=num_conf["name"],
-                    cob_id=cob_id,
+                    list_id=list_id,
                     byte_offset=num_conf["byte_offset"],
                     var_type=num_conf["var_type"],
                     min_val=num_conf["min"],
@@ -32,10 +32,10 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
     async_add_entities(entities)
 
 class NetVarNumber(NumberEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
-        self._cob_id = cob_id
+        self._list_id = list_id
         self._byte_offset = byte_offset
         self._var_type = var_type
         
@@ -44,7 +44,7 @@ class NetVarNumber(NumberEntity):
         self._attr_native_step = step
         
         self._attr_force_update = force_update
-        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
+        self._attr_unique_id = f"{DOMAIN}_{list_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_native_unit_of_measurement = unit_of_measurement
