@@ -2,6 +2,7 @@ import asyncio
 import logging
 import voluptuous as vol
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, DEFAULT_PORT
 
@@ -16,6 +17,7 @@ SENSOR_SCHEMA = vol.Schema({
     vol.Optional("state_class"): cv.string,
     vol.Optional("unit_of_measurement"): cv.string,
     vol.Optional("icon"): cv.string,
+    vol.Optional("force_update", default=False): cv.boolean,
 })
 
 SWITCH_SCHEMA = vol.Schema({
@@ -24,6 +26,7 @@ SWITCH_SCHEMA = vol.Schema({
     vol.Required("bit_offset"): int,
     vol.Optional("device_class"): cv.string,
     vol.Optional("icon"): cv.string,
+    vol.Optional("force_update", default=False): cv.boolean,
 })
 
 NUMBER_SCHEMA = vol.Schema({
@@ -36,6 +39,7 @@ NUMBER_SCHEMA = vol.Schema({
     vol.Optional("device_class"): cv.string,
     vol.Optional("unit_of_measurement"): cv.string,
     vol.Optional("icon"): cv.string,
+    vol.Optional("force_update", default=False): cv.boolean,
 })
 
 DEVICE_SCHEMA = vol.Schema({
@@ -76,9 +80,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             "numbers": device_conf["numbers"],
         }
 
-    for platform in ["sensor", "switch", "number"]:
+    platforms = set()
+    for device_conf in config[DOMAIN]:
+        if device_conf.get("sensors"):
+            platforms.add("sensor")
+        if device_conf.get("switches"):
+            platforms.add("switch")
+        if device_conf.get("numbers"):
+            platforms.add("number")
+
+    for platform in platforms:
         hass.async_create_task(
-            hass.helpers.discovery.async_load_platform(platform, DOMAIN, {}, config)
+            discovery.async_load_platform(hass, platform, DOMAIN, {}, config)
         )
 
     return True
@@ -122,14 +135,12 @@ class NetVarCoordinator:
 
     def _handle_packet(self, data: bytes, addr):
         if len(data) >= 20 and data[0:4] == b"\x00\x2D\x53\x33":
-            endian = "big" if self.big_endian else "little"
-            pkt_cob_id = int.from_bytes(data[8:10], endian)
-            pkt_var_count = int.from_bytes(data[12:14], endian)
-            pkt_total_len = int.from_bytes(data[14:16], endian)
-            pkt_sequence = int.from_bytes(data[16:18], endian)
+            pkt_cob_id = int.from_bytes(data[8:10], "little")
+            pkt_var_count = int.from_bytes(data[12:14], "little")
+            pkt_total_len = int.from_bytes(data[14:16], "little")
+            pkt_sequence = int.from_bytes(data[16:18], "little")
             payload = data[20:]
 
-            # LOG ODEBRANEGO PAKIECIE RX
             _LOGGER.info(
                 "Odebrano pakiet UDP [RX] od %s | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
                 addr[0], pkt_cob_id, pkt_var_count, pkt_total_len, pkt_sequence, payload.hex()
@@ -171,12 +182,10 @@ class NetVarCoordinator:
         header[0:4] = b"\x00\x2D\x53\x33"
         total_len = 20 + len(payload_bytes)
         
-        endian = "big" if self.big_endian else "little"
-        
-        header[8:10] = self.cob_id.to_bytes(2, endian)
-        header[12:14] = self.var_count.to_bytes(2, endian)
-        header[14:16] = total_len.to_bytes(2, endian)
-        header[16:18] = self.sequence_counter.to_bytes(2, endian)
+        header[8:10] = self.cob_id.to_bytes(2, "little")
+        header[12:14] = self.var_count.to_bytes(2, "little")
+        header[14:16] = total_len.to_bytes(2, "little")
+        header[16:18] = self.sequence_counter.to_bytes(2, "little")
         
         current_seq = self.sequence_counter
         self.sequence_counter = (self.sequence_counter + 1) % 65536
@@ -184,7 +193,6 @@ class NetVarCoordinator:
         packet = bytes(header) + payload_bytes
         self.transport.sendto(packet, (self.ip_address, self.port))
 
-        # LOG WYSŁANEGO PAKIETU TX
         _LOGGER.info(
             "Wysłano pakiet UDP [TX] do %s:%d | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
             self.ip_address, self.port, self.cob_id, self.var_count, total_len, current_seq, payload_bytes.hex()
