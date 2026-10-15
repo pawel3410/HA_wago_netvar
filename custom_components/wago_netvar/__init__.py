@@ -124,9 +124,18 @@ class NetVarCoordinator:
         if len(data) >= 20 and data[0:4] == b"\x00\x2D\x53\x33":
             endian = "big" if self.big_endian else "little"
             pkt_cob_id = int.from_bytes(data[8:10], endian)
+            pkt_var_count = int.from_bytes(data[12:14], endian)
+            pkt_total_len = int.from_bytes(data[14:16], endian)
+            pkt_sequence = int.from_bytes(data[16:18], endian)
+            payload = data[20:]
+
+            # LOG ODEBRANEGO PAKIECIE RX
+            _LOGGER.info(
+                "Odebrano pakiet UDP [RX] od %s | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
+                addr[0], pkt_cob_id, pkt_var_count, pkt_total_len, pkt_sequence, payload.hex()
+            )
             
             if pkt_cob_id == self.cob_id:
-                payload = data[20:]
                 if len(self.tx_payload) < len(payload):
                     self.tx_payload = bytearray(payload)
                 else:
@@ -134,6 +143,8 @@ class NetVarCoordinator:
 
                 for listener in self.listeners:
                     listener(payload)
+        else:
+            _LOGGER.warning("Odebrano nieznany lub za krótki pakiet UDP od %s (długość: %d)", addr[0], len(data))
 
     def register_listener(self, callback):
         if callback not in self.listeners:
@@ -166,7 +177,15 @@ class NetVarCoordinator:
         header[12:14] = self.var_count.to_bytes(2, endian)
         header[14:16] = total_len.to_bytes(2, endian)
         header[16:18] = self.sequence_counter.to_bytes(2, endian)
+        
+        current_seq = self.sequence_counter
         self.sequence_counter = (self.sequence_counter + 1) % 65536
 
         packet = bytes(header) + payload_bytes
         self.transport.sendto(packet, (self.ip_address, self.port))
+
+        # LOG WYSŁANEGO PAKIETU TX
+        _LOGGER.info(
+            "Wysłano pakiet UDP [TX] do %s:%d | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
+            self.ip_address, self.port, self.cob_id, self.var_count, total_len, current_seq, payload_bytes.hex()
+        )
