@@ -1,6 +1,7 @@
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import slugify
 from .const import DOMAIN
 
 async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_entities: AddEntitiesCallback, discovery_info=None) -> None:
@@ -20,17 +21,21 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     bit_offset=switch_conf["bit_offset"],
                     device_class=switch_conf.get("device_class"),
                     icon=switch_conf.get("icon"),
+                    force_update=switch_conf.get("force_update", False),
                 )
             )
     async_add_entities(entities)
 
 class NetVarSwitch(SwitchEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, bit_offset, device_class, icon):
+    def __init__(self, coordinator, name, cob_id, byte_offset, bit_offset, device_class, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
         self._cob_id = cob_id
         self._byte_offset = byte_offset
         self._bit_offset = bit_offset
+        
+        self._attr_force_update = force_update
+        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_icon = icon
