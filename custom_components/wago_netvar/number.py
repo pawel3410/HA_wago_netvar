@@ -2,6 +2,7 @@ import struct
 from homeassistant.components.number import NumberEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import slugify
 from .const import DOMAIN
 
 async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_entities: AddEntitiesCallback, discovery_info=None) -> None:
@@ -25,12 +26,13 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     device_class=num_conf.get("device_class"),
                     unit_of_measurement=num_conf.get("unit_of_measurement"),
                     icon=num_conf.get("icon"),
+                    force_update=num_conf.get("force_update", False),
                 )
             )
     async_add_entities(entities)
 
 class NetVarNumber(NumberEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon):
+    def __init__(self, coordinator, name, cob_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
         self._cob_id = cob_id
@@ -40,6 +42,9 @@ class NetVarNumber(NumberEntity):
         self._attr_native_min_value = min_val
         self._attr_native_max_value = max_val
         self._attr_native_step = step
+        
+        self._attr_force_update = force_update
+        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_native_unit_of_measurement = unit_of_measurement
