@@ -11,10 +11,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     ip_address = entry.data.get("ip_address")
     port = entry.data.get("port", 1202)
-    cob_id = entry.data.get("cob_id", 1)
     big_endian = entry.data.get("big_endian", True)
 
-    coordinator = NetVarCoordinator(hass, ip_address, port, cob_id, big_endian)
+    coordinator = NetVarCoordinator(hass, ip_address, port, big_endian)
     await coordinator.async_setup()
     
     hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -39,15 +38,15 @@ class NetVarUDPProtocol(asyncio.DatagramProtocol):
         self.callback(data, addr)
 
 class NetVarCoordinator:
-    def __init__(self, hass: HomeAssistant, ip_address: str, port: int, cob_id: int, big_endian: bool):
+    def __init__(self, hass: HomeAssistant, ip_address: str, port: int, big_endian: bool):
         self.hass = hass
         self.ip_address = ip_address
         self.port = port
-        self.cob_id = cob_id
         self.big_endian = big_endian
         self.transport = None
         self.protocol = None
-        self.listeners = []
+        # Słownik: kluczem jest cob_id, wartością lista funkcji zwrotnych (encji)
+        self.listeners = {}
         self.sequence_counter = 0
 
     async def async_setup(self):
@@ -56,7 +55,7 @@ class NetVarCoordinator:
             lambda: NetVarUDPProtocol(self._handle_packet),
             local_addr=('0.0.0.0', self.port)
         )
-        _LOGGER.info("NetVar UDP serwer uruchomiony na porcie %d", self.port)
+        _LOGGER.info("NetVar UDP serwer nasłuchuje na porcie %d", self.port)
 
     async def async_stop(self):
         if self.transport:
@@ -64,24 +63,26 @@ class NetVarCoordinator:
 
     def _handle_packet(self, data: bytes, addr):
         if len(data) >= 20 and data[0:4] == b"\x00\x2D\x53\x33":
-            # Parsowanie nagłówka zgodnie z C++
             endian = "big" if self.big_endian else "little"
             pkt_cob_id = int.from_bytes(data[8:10], endian)
             
-            if pkt_cob_id == self.cob_id:
+            # Jeśli mamy zarejestrowane encje na ten konkretny cob_id, przekazujemy im payload
+            if pkt_cob_id in self.listeners:
                 payload = data[20:]
-                # Przekazanie payloadu do encji
-                for listener in self.listeners:
+                for listener in self.listeners[pkt_cob_id]:
                     listener(payload)
 
-    def register_listener(self, callback):
-        self.listeners.append(callback)
+    def register_listener(self, cob_id: int, callback):
+        if cob_id not in self.listeners:
+            self.listeners[cob_id] = []
+        if callback not in self.listeners[cob_id]:
+            self.listeners[cob_id].append(callback)
 
-    def unregister_listener(self, callback):
-        if callback in self.listeners:
-            self.listeners.remove(callback)
+    def unregister_listener(self, cob_id: int, callback):
+        if cob_id in self.listeners and callback in self.listeners[cob_id]:
+            self.listeners[cob_id].remove(callback)
 
-    def send_packet(self, payload_bytes: bytes):
+    def send_packet(self, cob_id: int, payload_bytes: bytes):
         if not self.transport or not self.ip_address:
             return
         
@@ -90,7 +91,7 @@ class NetVarCoordinator:
         total_len = 20 + len(payload_bytes)
         
         endian = "big" if self.big_endian else "little"
-        header[8:10] = self.cob_id.to_bytes(2, endian)
+        header[8:10] = cob_id.to_bytes(2, endian)
         header[14:16] = total_len.to_bytes(2, endian)
         header[16:18] = self.sequence_counter.to_bytes(2, endian)
         self.sequence_counter = (self.sequence_counter + 1) % 65536
