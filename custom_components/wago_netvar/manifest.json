@@ -1,10 +1,10 @@
 {
   "domain": "wago_netvar",
   "name": "Wago NetVar UDP",
-  "documentation": "https://github.com/pawel3410/HA_custom_components/custom_components/wago_netvar",
+  "documentation": "https://github.com/pawel3410/HA_wago_netvar/blob/main/custom_components/wago_netvar",
   "requirements": [],
   "codeowners": [],
   "iot_class": "local_push",
-  "version": "1.0.0",
-  "config_flow": true
+  "version": "2.0.0",
+  "config_flow": false
 }
