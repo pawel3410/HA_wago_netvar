@@ -1,6 +1,7 @@
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import slugify
 from .const import DOMAIN
 import struct
 
@@ -24,18 +25,22 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     state_class=sensor_conf.get("state_class"),
                     unit_of_measurement=sensor_conf.get("unit_of_measurement"),
                     icon=sensor_conf.get("icon"),
+                    force_update=sensor_conf.get("force_update", False),
                 )
             )
     async_add_entities(entities)
 
 class NetVarSensor(SensorEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon):
+    def __init__(self, coordinator, name, cob_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
         self._cob_id = cob_id
         self._byte_offset = byte_offset
         self._size = size
         self._var_type = var_type
+        
+        self._attr_force_update = force_update
+        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_state_class = state_class
