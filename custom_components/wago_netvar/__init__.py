@@ -45,9 +45,9 @@ NUMBER_SCHEMA = vol.Schema({
 DEVICE_SCHEMA = vol.Schema({
     vol.Required("ip_address"): cv.string,
     vol.Optional("port", default=DEFAULT_PORT): int,
-    vol.Required("cob_id"): int,
+    vol.Required("list_id"): int,
     vol.Optional("var_count", default=1): int,
-    vol.Optional("big_endian", default=True): bool,
+    vol.Optional("big_endian", default=False): bool,
     vol.Optional("sensors", default=[]): vol.All(cv.ensure_list, [SENSOR_SCHEMA]),
     vol.Optional("switches", default=[]): vol.All(cv.ensure_list, [SWITCH_SCHEMA]),
     vol.Optional("numbers", default=[]): vol.All(cv.ensure_list, [NUMBER_SCHEMA]),
@@ -66,14 +66,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     for device_conf in config[DOMAIN]:
         ip_address = device_conf["ip_address"]
         port = device_conf["port"]
-        cob_id = device_conf["cob_id"]
+        list_id = device_conf["list_id"]
         var_count = device_conf["var_count"]
         big_endian = device_conf["big_endian"]
 
-        coordinator = NetVarCoordinator(hass, ip_address, port, cob_id, var_count, big_endian)
+        coordinator = NetVarCoordinator(hass, ip_address, port, list_id, var_count, big_endian)
         await coordinator.async_setup()
 
-        hass.data[DOMAIN][cob_id] = {
+        hass.data[DOMAIN][list_id] = {
             "coordinator": coordinator,
             "sensors": device_conf["sensors"],
             "switches": device_conf["switches"],
@@ -108,11 +108,11 @@ class NetVarUDPProtocol(asyncio.DatagramProtocol):
         self.callback(data, addr)
 
 class NetVarCoordinator:
-    def __init__(self, hass: HomeAssistant, ip_address: str, port: int, cob_id: int, var_count: int, big_endian: bool):
+    def __init__(self, hass: HomeAssistant, ip_address: str, port: int, list_id: int, var_count: int, big_endian: bool):
         self.hass = hass
         self.ip_address = ip_address
         self.port = port
-        self.cob_id = cob_id
+        self.list_id = list_id
         self.var_count = var_count
         self.big_endian = big_endian
         self.transport = None
@@ -127,7 +127,7 @@ class NetVarCoordinator:
             lambda: NetVarUDPProtocol(self._handle_packet),
             local_addr=('0.0.0.0', self.port)
         )
-        _LOGGER.info("NetVar UDP nasłuchuje na porcie %d (COB-ID: %d)", self.port, self.cob_id)
+        _LOGGER.info("NetVar UDP nasłuchuje na porcie %d (List-ID: %d)", self.port, self.list_id)
 
     async def async_stop(self):
         if self.transport:
@@ -135,18 +135,18 @@ class NetVarCoordinator:
 
     def _handle_packet(self, data: bytes, addr):
         if len(data) >= 20 and data[0:4] == b"\x00\x2D\x53\x33":
-            pkt_cob_id = int.from_bytes(data[8:10], "little")
+            pkt_list_id = int.from_bytes(data[8:10], "little")
             pkt_var_count = int.from_bytes(data[12:14], "little")
             pkt_total_len = int.from_bytes(data[14:16], "little")
             pkt_sequence = int.from_bytes(data[16:18], "little")
             payload = data[20:]
 
             _LOGGER.info(
-                "Odebrano pakiet UDP [RX] od %s | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
-                addr[0], pkt_cob_id, pkt_var_count, pkt_total_len, pkt_sequence, payload.hex()
+                "Odebrano pakiet UDP [RX] od %s | Port: %d | List-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
+                addr[0], self.port, pkt_list_id, pkt_var_count, pkt_total_len, pkt_sequence, payload.hex()
             )
             
-            if pkt_cob_id == self.cob_id:
+            if pkt_list_id == self.list_id:
                 if len(self.tx_payload) < len(payload):
                     self.tx_payload = bytearray(payload)
                 else:
@@ -155,7 +155,7 @@ class NetVarCoordinator:
                 for listener in self.listeners:
                     listener(payload)
         else:
-            _LOGGER.warning("Odebrano nieznany lub za krótki pakiet UDP od %s (długość: %d)", addr[0], len(data))
+            _LOGGER.warning("Odebrano nieznany lub za krótki pakiet UDP od %s na porcie %d (długość: %d)", addr[0], self.port, len(data))
 
     def register_listener(self, callback):
         if callback not in self.listeners:
@@ -182,7 +182,7 @@ class NetVarCoordinator:
         header[0:4] = b"\x00\x2D\x53\x33"
         total_len = 20 + len(payload_bytes)
         
-        header[8:10] = self.cob_id.to_bytes(2, "little")
+        header[8:10] = self.list_id.to_bytes(2, "little")
         header[12:14] = self.var_count.to_bytes(2, "little")
         header[14:16] = total_len.to_bytes(2, "little")
         header[16:18] = self.sequence_counter.to_bytes(2, "little")
@@ -194,6 +194,6 @@ class NetVarCoordinator:
         self.transport.sendto(packet, (self.ip_address, self.port))
 
         _LOGGER.info(
-            "Wysłano pakiet UDP [TX] do %s:%d | COB-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
-            self.ip_address, self.port, self.cob_id, self.var_count, total_len, current_seq, payload_bytes.hex()
+            "Wysłano pakiet UDP [TX] do %s:%d | Port: %d | List-ID: %d | Var Count: %d | Total Len: %d | Seq: %d | Payload (hex): %s",
+            self.ip_address, self.port, self.port, self.list_id, self.var_count, total_len, current_seq, payload_bytes.hex()
         )
