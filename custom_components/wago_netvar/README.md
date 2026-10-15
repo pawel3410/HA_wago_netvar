@@ -7,11 +7,27 @@ Niestandardowa integracja (**Custom Integration**) dla Home Assistanta umożliwi
 ## 🚀 Kluczowe funkcjonalności
 
 * **Komunikacja lokalna UDP:** Bezpośrednia wymiana danych w czasie rzeczywistym między Home Assistantem a sterownikiem PLC.
-* **Obsługa wielu ramek (Wiele COB-ID):** Możliwość nasłuchiwania i wysyłania danych dla różnych grup zmiennych rozróżnianych po identyfikatorze `cob_id`.
+* **Obsługa wielu ramek (Wiele COB-ID):** Możliwość niezależnego nasłuchiwania i wysyłania danych dla różnych identyfikatorów `cob_id` na tym samym porcie.
 * **Dwukierunkowy przepływ:** 
-  * **Odczyt (RX):** Automatyczna aktualizacja stanów encji w Home Assistancie po odebraniu ramki ze sterownika.
-  * **Zapis (TX):** Wysyłanie zmian stanu (np. przełączenie switcha w HA) bezpośrednio do sterownika PLC.
-* **Wsparcie dla wielu typów danych PLC:** `BOOL`, `REAL` (zmiennoprzecinkowe), `INT`, `DINT` i inne.
+  * **Odczyt (RX):** Automatyczna aktualizacja stanów encji w Home Assistancie po odebraniu ramki ze sterownika PLC.
+  * **Zapis (TX):** Wysyłanie zmian stanu (np. przełączenie switcha w HA) bezpośrednio do sterownika.
+* **Wsparcie dla big-endian i little-endian:** Konfigurowalny endianizm zgodny z architekturą sterownika PLC.
+
+---
+
+## 📋 Obsługiwane typy zmiennych PLC (Data Types)
+
+Integracja w pełni wspiera standardowe typy danych CoDeSys/IEC 61131-3 przesyłane w payloadzie ramki:
+
+| Typ PLC | Kategoria | Rozmiar (w bajtach) | Opis / Zastosowanie w HA |
+| :--- | :--- | :--- | :--- |
+| **`BOOL`** | Logiczny | 1 bit (pakowane) | Stany binarne, przełączniki (`switch`), czujniki otwarcia (`binary_sensor`) |
+| **`BYTE` / `USINT` / `SINT`** | Całkowity | 1 bajt | Małe wartości numeryczne, stany, tryby (`sensor`) |
+| **`WORD` / `UINT` / `INT`** | Całkowity | 2 bajty | Liczniki, poziomy, temperatury całkowite (`sensor`, `number`) |
+| **`DWORD` / `UDINT` / `DINT` / `TIME`** | Całkowity / Czas | 4 bajty | Duże liczniki, znaczniki czasu, zużycie energii (`sensor`) |
+| **`REAL`** | Zmiennoprzecinkowy | 4 bajty | Standardowa precyzja: temperatura, ciśnienie, wilgotność (`sensor`, `number`) |
+| **`LREAL`** | Zmiennoprzecinkowy | 8 bajtów | Podwójna precyzja: precyzyjne pomiary analityczne (`sensor`) |
+| **`STRING(n)`** | Tekstowy | $n + 1$ bajtów | Komunikaty tekstowe, nazwy trybów (`sensor`) |
 
 ---
 
@@ -25,43 +41,31 @@ Niestandardowa integracja (**Custom Integration**) dla Home Assistanta umożliwi
 
 ---
 
-## ⚙️ Konfiguracja i obsługa wielu ramek (COB-ID)
+## ⚙️ Konfiguracja i obsługa wielu ramek (Wiele COB-ID)
 
-Protokół NetVar pozwala na dzielenie zmiennych na niezależne bloki (ramki) identyfikowane za pomocą unikalnego **COB-ID**. Każda ramka posiada swój własny nagłówek `.S3` oraz payload zawierający zmienne przypisane do konkretnego blokowego offsetu pamięci.
+Protokół NetVar pozwala na dzielenie zmiennych na niezależne bloki (ramki) identyfikowane za pomocą unikalnego **COB-ID**. Każda encja w kodzie integracji przypisana jest do konkretnego `cob_id` oraz offsetu bajtowego wewnątrz payloadu.
 
-### Przykład konfiguracji dla dwóch różnych ramek (COB-ID: 1 oraz COB-ID: 2)
+### Przykład definicji encji dla różnych COB-ID:
 
-Poniższy przykład przedstawia konfigurację integracji obsługującą dwa niezależne urządzenia lub bloki logiczne w sterowniku PLC:
-
-#### 1. Ramka sterująca oknami i oświetleniem (`cob_id: 1`)
-* **Adres IP PLC:** `192.168.1.10`
-* **Port UDP:** `1202`
-* **COB-ID:** `1`
-* **Zawartość payloadu:**
-  * Offset `0` (1 bajt): Przełącznik światła w salonie (`BOOL`)
-  * Offset `1` (4 bajty): Aktualna temperatura w pokoju (`REAL`)
-
-#### 2. Ramka systemowa i liczniki (`cob_id: 2`)
-* **Adres IP PLC:** `192.168.1.10`
-* **Port UDP:** `1202`
-* **COB-ID:** `2`
-* **Zawartość payloadu:**
-  * Offset `0` (4 bajty): Całkowite zużycie energii (`REAL` / `DINT`)
-  * Offset `4` (1 bajt): Tryb pracy systemu (`BOOL`)
-
----
-
-## 📝 Przykłady wykorzystania w Home Assistancie
-
-### Odczyt zmiennych (Sensor)
-Aby odczytać wartość numeryczną (np. typ `REAL` o długości 4 bajtów pod konkretnym offsetem bajtowym w danej ramce):
+#### 1. Ramka sterująca oświetleniem (`cob_id = 1`)
+* **Offset 0 (4 bajty, `REAL`):** Temperatura w salonie (`NetVarSensor`)
+* **Offset 4 (Bajt 4, Bit 0):** Przełącznik światła głównego (`NetVarSwitch`)
 
 ```python
-# Przykład encji sensor odbierającej dane z ramki o określonym offsetcie
-NetVarSensor(
-    coordinator=coordinator, 
-    name="Temperatura PLC", 
-    byte_offset=1,   # Offset wewnątrz payloadu
-    size=4,          # Rozmiar w bajtach (REAL = 4 bajty)
-    var_type="REAL"
-)
+# Rejestracja czujnika temperatury z cob_id = 1
+NetVarSensor(coordinator, name="Temperatura Salon", cob_id=1, byte_offset=0, size=4, var_type="REAL")
+
+# Rejestracja przełącznika światła z cob_id = 1
+NetVarSwitch(coordinator, name="Światło Salon", cob_id=1, byte_offset=4, bit_offset=0)
+
+# Rejestracja licznika z cob_id = 2
+NetVarSensor(coordinator, name="Licznik Energii", cob_id=2, byte_offset=0, size=2, var_type="INT")
+
+🛠️ Specyfikacja techniczna ramki NetVar (.S3)Struktura nagłówka pakietu UDP (pierwsze 20 bajtów):
+Pozycja (Bajty) Nazwa pola Opis
+0 - 3Magiczny nagłówekStała flaga inicjalizacyjna: 0x00, 0x2D, 0x53, 0x33 (.S3)
+8 - 9cob_idIdentyfikator bloku zmiennych (rozpoznawanie ramek)
+12 - 13checksumSuma kontrolna pakietu
+14 - 15total_lenCałkowita długość pakietu (20 bajtów nagłówka + payload)
+16 - 17sequenceLicznik sekwencji pakietów
+20+PayloadWłaściwe dane zmiennych PLC (zmienne upakowane binarnie)
