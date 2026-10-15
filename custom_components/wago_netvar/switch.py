@@ -9,14 +9,14 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
         return
 
     entities = []
-    for cob_id, data in hass.data[DOMAIN].items():
+    for list_id, data in hass.data[DOMAIN].items():
         coordinator = data["coordinator"]
         for switch_conf in data["switches"]:
             entities.append(
                 NetVarSwitch(
                     coordinator=coordinator,
                     name=switch_conf["name"],
-                    cob_id=cob_id,
+                    list_id=list_id,
                     byte_offset=switch_conf["byte_offset"],
                     bit_offset=switch_conf["bit_offset"],
                     device_class=switch_conf.get("device_class"),
@@ -27,15 +27,15 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
     async_add_entities(entities)
 
 class NetVarSwitch(SwitchEntity):
-    def __init__(self, coordinator, name, cob_id, byte_offset, bit_offset, device_class, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, bit_offset, device_class, icon, force_update):
         self._coordinator = coordinator
         self._attr_name = name
-        self._cob_id = cob_id
+        self._list_id = list_id
         self._byte_offset = byte_offset
         self._bit_offset = bit_offset
         
         self._attr_force_update = force_update
-        self._attr_unique_id = f"{DOMAIN}_{cob_id}_{slugify(name)}"
+        self._attr_unique_id = f"{DOMAIN}_{list_id}_{slugify(name)}"
         
         self._attr_device_class = device_class
         self._attr_icon = icon
