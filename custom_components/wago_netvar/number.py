@@ -11,6 +11,9 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
 
     entities = []
     for list_id, data in hass.data[DOMAIN].items():
+        if list_id == "hubs":
+            continue
+            
         coordinator = data["coordinator"]
         for num_conf in data["numbers"]:
             entities.append(
