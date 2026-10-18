@@ -25,12 +25,14 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     device_class=switch_conf.get("device_class"),
                     icon=switch_conf.get("icon"),
                     force_update=switch_conf.get("force_update", False),
+                    entity_category=switch_conf.get("entity_category"),
+                    enabled_by_default=switch_conf.get("enabled_by_default", True),
                 )
             )
     async_add_entities(entities)
 
 class NetVarSwitch(SwitchEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, bit_offset, device_class, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, bit_offset, device_class, icon, force_update, entity_category, enabled_by_default):
         self._coordinator = coordinator
         self._attr_name = name
         self._list_id = list_id
@@ -42,6 +44,8 @@ class NetVarSwitch(SwitchEntity):
         
         self._attr_device_class = device_class
         self._attr_icon = icon
+        self._attr_entity_category = entity_category
+        self._attr_entity_registry_enabled_default = enabled_by_default
         self._is_on = False
         self.current_payload = bytearray(100)
 
