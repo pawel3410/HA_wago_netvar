@@ -18,6 +18,9 @@ SENSOR_SCHEMA = vol.Schema({
     vol.Optional("unit_of_measurement"): cv.string,
     vol.Optional("icon"): cv.string,
     vol.Optional("force_update", default=False): cv.boolean,
+    vol.Optional("suggested_display_precision"): cv.positive_int,
+    vol.Optional("entity_category"): vol.In(["diagnostic", "config"]),
+    vol.Optional("enabled_by_default", default=True): cv.boolean,
 })
 
 SWITCH_SCHEMA = vol.Schema({
@@ -27,6 +30,8 @@ SWITCH_SCHEMA = vol.Schema({
     vol.Optional("device_class"): cv.string,
     vol.Optional("icon"): cv.string,
     vol.Optional("force_update", default=False): cv.boolean,
+    vol.Optional("entity_category"): vol.In(["diagnostic", "config"]),
+    vol.Optional("enabled_by_default", default=True): cv.boolean,
 })
 
 NUMBER_SCHEMA = vol.Schema({
@@ -40,6 +45,8 @@ NUMBER_SCHEMA = vol.Schema({
     vol.Optional("unit_of_measurement"): cv.string,
     vol.Optional("icon"): cv.string,
     vol.Optional("force_update", default=False): cv.boolean,
+    vol.Optional("entity_category"): vol.In(["diagnostic", "config"]),
+    vol.Optional("enabled_by_default", default=True): cv.boolean,
 })
 
 DEVICE_SCHEMA = vol.Schema({
@@ -73,7 +80,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         var_count = device_conf["var_count"]
         big_endian = device_conf["big_endian"]
 
-        # Utwórz jeden wspólny hub dla danego portu UDP, jeśli jeszcze nie istnieje
         if port not in hubs:
             hub = NetVarPortHub(hass, port)
             await hub.async_setup()
@@ -125,7 +131,6 @@ class NetVarUDPProtocol(asyncio.DatagramProtocol):
 
 
 class NetVarPortHub:
-    """Zarządza jednym socketem UDP na danym porcie i rozdziela pakiety do odpowiednich list."""
     def __init__(self, hass: HomeAssistant, port: int):
         self.hass = hass
         self.port = port
