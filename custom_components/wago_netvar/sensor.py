@@ -29,12 +29,15 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     unit_of_measurement=sensor_conf.get("unit_of_measurement"),
                     icon=sensor_conf.get("icon"),
                     force_update=sensor_conf.get("force_update", False),
+                    suggested_display_precision=sensor_conf.get("suggested_display_precision"),
+                    entity_category=sensor_conf.get("entity_category"),
+                    enabled_by_default=sensor_conf.get("enabled_by_default", True),
                 )
             )
     async_add_entities(entities)
 
 class NetVarSensor(SensorEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update, suggested_display_precision, entity_category, enabled_by_default):
         self._coordinator = coordinator
         self._attr_name = name
         self._list_id = list_id
@@ -49,6 +52,9 @@ class NetVarSensor(SensorEntity):
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_icon = icon
+        self._attr_suggested_display_precision = suggested_display_precision
+        self._attr_entity_category = entity_category
+        self._attr_entity_registry_enabled_default = enabled_by_default
         self._attr_native_value = None
 
     async def async_added_to_hass(self):
@@ -66,7 +72,7 @@ class NetVarSensor(SensorEntity):
 
         if self._var_type == "REAL":
             val = struct.unpack('>f' if endian == 'big' else '<f', raw_data)[0]
-            self._attr_native_value = round(val, 2)
+            self._attr_native_value = val
         else:
             self._attr_native_value = int.from_bytes(raw_data, endian, signed=True)
 
