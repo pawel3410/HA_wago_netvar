@@ -30,12 +30,14 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     unit_of_measurement=num_conf.get("unit_of_measurement"),
                     icon=num_conf.get("icon"),
                     force_update=num_conf.get("force_update", False),
+                    entity_category=num_conf.get("entity_category"),
+                    enabled_by_default=num_conf.get("enabled_by_default", True),
                 )
             )
     async_add_entities(entities)
 
 class NetVarNumber(NumberEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update):
+    def __init__(self, coordinator, name, list_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update, entity_category, enabled_by_default):
         self._coordinator = coordinator
         self._attr_name = name
         self._list_id = list_id
@@ -52,6 +54,8 @@ class NetVarNumber(NumberEntity):
         self._attr_device_class = device_class
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_icon = icon
+        self._attr_entity_category = entity_category
+        self._attr_entity_registry_enabled_default = enabled_by_default
         self._attr_native_value = min_val
 
     async def async_added_to_hass(self):
@@ -70,7 +74,7 @@ class NetVarNumber(NumberEntity):
 
         if self._var_type == "REAL":
             val = struct.unpack('>f' if endian == 'big' else '<f', raw_data)[0]
-            self._attr_native_value = round(val, 2)
+            self._attr_native_value = val
         else:
             self._attr_native_value = int.from_bytes(raw_data, endian, signed=True)
 
