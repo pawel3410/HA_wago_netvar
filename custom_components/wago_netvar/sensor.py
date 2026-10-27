@@ -32,7 +32,7 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
                     suggested_display_precision=sensor_conf.get("suggested_display_precision"),
                     entity_category=sensor_conf.get("entity_category"),
                     enabled_by_default=sensor_conf.get("enabled_by_default", True),
-                    zero_as_unavailable=sensor_conf.get("zero_as_unavailable", False),
+                    zero_as_unavailable=sensor_conf.get("zero_as_unavailable", True),
                 )
             )
     async_add_entities(entities)
