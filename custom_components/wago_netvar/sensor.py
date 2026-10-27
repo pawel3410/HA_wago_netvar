@@ -56,6 +56,7 @@ class NetVarSensor(SensorEntity):
         self._attr_suggested_display_precision = suggested_display_precision
         self._attr_entity_category = entity_category
         self._attr_entity_registry_enabled_default = enabled_by_default
+        self._zero_as_unavailable = zero_as_unavailable
         self._attr_native_value = None
 
     async def async_added_to_hass(self):
@@ -71,10 +72,17 @@ class NetVarSensor(SensorEntity):
         raw_data = payload[self._byte_offset:self._byte_offset + self._size]
         endian = "big" if self._coordinator.big_endian else "little"
 
-        if self._var_type == "REAL":
+    if self._var_type == "REAL":
             val = struct.unpack('>f' if endian == 'big' else '<f', raw_data)[0]
-            self._attr_native_value = val
+            if self._zero_as_unavailable and val == 0.0:
+                self._attr_native_value = None
+            else:
+                self._attr_native_value = val
         else:
-            self._attr_native_value = int.from_bytes(raw_data, endian, signed=True)
+            val = int.from_bytes(raw_data, endian, signed=True)
+            if self._zero_as_unavailable and val == 0:
+                self._attr_native_value = None
+            else:
+                self._attr_native_value = val
 
         self.schedule_update_ha_state()
