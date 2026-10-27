@@ -21,7 +21,7 @@ SENSOR_SCHEMA = vol.Schema({
     vol.Optional("suggested_display_precision"): cv.positive_int,
     vol.Optional("entity_category"): vol.In(["diagnostic", "config"]),
     vol.Optional("enabled_by_default", default=True): cv.boolean,
-    vol.Optional("zero_as_unavailable", default=False): cv.boolean,
+    vol.Optional("zero_as_unavailable", default=True): cv.boolean,
 })
 
 SWITCH_SCHEMA = vol.Schema({
