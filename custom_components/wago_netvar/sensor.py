@@ -38,7 +38,7 @@ async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_enti
     async_add_entities(entities)
 
 class NetVarSensor(SensorEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update, suggested_display_precision, entity_category, enabled_by_default):
+    def __init__(self, coordinator, name, list_id, byte_offset, size, var_type, device_class, state_class, unit_of_measurement, icon, force_update, suggested_display_precision, entity_category, enabled_by_default, zero_as_unavailable=True):
         self._coordinator = coordinator
         self._attr_name = name
         self._list_id = list_id
@@ -72,7 +72,7 @@ class NetVarSensor(SensorEntity):
         raw_data = payload[self._byte_offset:self._byte_offset + self._size]
         endian = "big" if self._coordinator.big_endian else "little"
 
-    if self._var_type == "REAL":
+        if self._var_type == "REAL":
             val = struct.unpack('>f' if endian == 'big' else '<f', raw_data)[0]
             if self._zero_as_unavailable and val == 0.0:
                 self._attr_native_value = None
