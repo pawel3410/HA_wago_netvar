@@ -1,96 +1,100 @@
-import struct
 from homeassistant.components.number import NumberEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import slugify
-from .const import DOMAIN
 
-async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_entities: AddEntitiesCallback, discovery_info=None) -> None:
-    if DOMAIN not in hass.data:
+from .const import DOMAIN
+from .entity import NetVarEntity
+
+
+def _get_yaml_entities(hass):
+    entities = []
+
+    devices = hass.data.get(DOMAIN, {}).get("devices", {})
+
+    for device in devices.values():
+        if device.get("source") != "yaml":
+            continue
+
+        coordinator = device["coordinator"]
+
+        for variable in coordinator.variables:
+            if variable["entity"] == "number":
+                entities.append(
+                    NetVarNumber(coordinator, variable)
+                )
+
+    return entities
+
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info=None,
+):
+    async_add_entities(_get_yaml_entities(hass))
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry,
+    async_add_entities: AddEntitiesCallback,
+):
+    device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
+        entry.entry_id
+    )
+
+    if not device:
         return
 
-    entities = []
-    for list_id, data in hass.data[DOMAIN].items():
-        if list_id == "hubs":
-            continue
-            
-        coordinator = data["coordinator"]
-        for num_conf in data["numbers"]:
-            entities.append(
-                NetVarNumber(
-                    coordinator=coordinator,
-                    name=num_conf["name"],
-                    list_id=list_id,
-                    byte_offset=num_conf["byte_offset"],
-                    var_type=num_conf["var_type"],
-                    min_val=num_conf["min"],
-                    max_val=num_conf["max"],
-                    step=num_conf["step"],
-                    device_class=num_conf.get("device_class"),
-                    unit_of_measurement=num_conf.get("unit_of_measurement"),
-                    icon=num_conf.get("icon"),
-                    force_update=num_conf.get("force_update", False),
-                    entity_category=num_conf.get("entity_category"),
-                    enabled_by_default=num_conf.get("enabled_by_default", True),
-                )
-            )
+    coordinator = device["coordinator"]
+
+    entities = [
+        NetVarNumber(coordinator, variable)
+        for variable in coordinator.variables
+        if variable["entity"] == "number"
+    ]
+
     async_add_entities(entities)
 
-class NetVarNumber(NumberEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, var_type, min_val, max_val, step, device_class, unit_of_measurement, icon, force_update, entity_category, enabled_by_default):
-        self._coordinator = coordinator
-        self._attr_name = name
-        self._list_id = list_id
-        self._byte_offset = byte_offset
-        self._var_type = var_type
-        
-        self._attr_native_min_value = min_val
-        self._attr_native_max_value = max_val
-        self._attr_native_step = step
-        
-        self._attr_force_update = force_update
-        self._attr_unique_id = f"{DOMAIN}_{list_id}_{slugify(name)}"
-        
-        self._attr_device_class = device_class
-        self._attr_native_unit_of_measurement = unit_of_measurement
-        self._attr_icon = icon
-        self._attr_entity_category = entity_category
-        self._attr_entity_registry_enabled_default = enabled_by_default
-        self._attr_native_value = min_val
 
-    async def async_added_to_hass(self):
-        self._coordinator.register_listener(self._handle_update)
+class NetVarNumber(NetVarEntity, NumberEntity):
+    def __init__(self, coordinator, variable):
+        super().__init__(coordinator, variable)
 
-    async def async_will_remove_from_hass(self):
-        self._coordinator.unregister_listener(self._handle_update)
+        self._attr_native_min_value = float(
+            variable.get("min", 0)
+        )
+        self._attr_native_max_value = float(
+            variable.get("max", 100)
+        )
+        self._attr_native_step = float(
+            variable.get("step", 1)
+        )
 
-    def _handle_update(self, payload: bytes):
-        size = 4 if self._var_type in ["REAL", "DINT", "UDINT"] else 2
-        if len(payload) < self._byte_offset + size:
-            return
-        
-        raw_data = payload[self._byte_offset:self._byte_offset + size]
-        endian = "big" if self._coordinator.big_endian else "little"
+        self._attr_native_unit_of_measurement = variable.get(
+            "unit_of_measurement"
+        )
+        self._attr_device_class = variable.get("device_class")
 
-        if self._var_type == "REAL":
-            val = struct.unpack('>f' if endian == 'big' else '<f', raw_data)[0]
-            self._attr_native_value = val
-        else:
-            self._attr_native_value = int.from_bytes(raw_data, endian, signed=True)
+        self._attr_native_value = float(
+            variable.get("initial_value", 0)
+        )
 
-        self.schedule_update_ha_state()
-
-    async def async_set_native_value(self, value: float) -> None:
-        endian = "big" if self._coordinator.big_endian else "little"
-        
-        if self._var_type == "REAL":
-            encoded_data = struct.pack('>f' if endian == 'big' else '<f', float(value))
-        else:
-            size = 2 if self._var_type in ["INT", "UINT"] else 4
-            signed = self._var_type in ["INT", "DINT"]
-            encoded_data = int(value).to_bytes(size, endian, signed=signed)
-
-        self._coordinator.update_payload_bytes(self._byte_offset, encoded_data)
+    def _update_value(self, value):
         self._attr_native_value = value
         self.schedule_update_ha_state()
-        self._coordinator.send_frame()
+
+    async def async_set_native_value(self, value):
+        value = float(value)
+
+        if value < self._attr_native_min_value:
+            raise ValueError("Value is below minimum")
+
+        if value > self._attr_native_max_value:
+            raise ValueError("Value is above maximum")
+
+        self.coordinator.set_variable(self.variable, value)
+
+        self._attr_native_value = value
+        self.schedule_update_ha_state()
