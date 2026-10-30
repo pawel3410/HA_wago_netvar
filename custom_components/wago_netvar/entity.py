@@ -1,4 +1,3 @@
-
 import logging
 
 from homeassistant.helpers.entity import Entity
@@ -6,7 +5,6 @@ from homeassistant.util import slugify
 
 from .const import DOMAIN, MODE_READ
 from .codec import decode_value, get_size
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,12 +73,11 @@ class NetVarEntity(Entity):
             self.variable["type"],
         )
 
-    def _handle_update(self, payload):
+    def _handle_update(self, payload, updated_indices):
         if self.coordinator.mode != MODE_READ:
             return
 
-        if self._variable_index not in self.coordinator.received:
-            self.schedule_update_ha_state()
+        if self._variable_index not in updated_indices:
             return
 
         try:
