@@ -1,84 +1,82 @@
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import slugify
-from .const import DOMAIN
 
-async def async_setup_platform(hass: HomeAssistant, config: dict, async_add_entities: AddEntitiesCallback, discovery_info=None) -> None:
-    if DOMAIN not in hass.data:
+from .const import DOMAIN
+from .entity import NetVarEntity
+
+
+def _get_yaml_entities(hass):
+    entities = []
+
+    devices = hass.data.get(DOMAIN, {}).get("devices", {})
+
+    for device in devices.values():
+        if device.get("source") != "yaml":
+            continue
+
+        coordinator = device["coordinator"]
+
+        for variable in coordinator.variables:
+            if variable["entity"] == "switch":
+                entities.append(
+                    NetVarSwitch(coordinator, variable)
+                )
+
+    return entities
+
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info=None,
+):
+    async_add_entities(_get_yaml_entities(hass))
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry,
+    async_add_entities: AddEntitiesCallback,
+):
+    device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
+        entry.entry_id
+    )
+
+    if not device:
         return
 
-    entities = []
-    for list_id, data in hass.data[DOMAIN].items():
-        if list_id == "hubs":
-            continue
-            
-        coordinator = data["coordinator"]
-        for switch_conf in data["switches"]:
-            entities.append(
-                NetVarSwitch(
-                    coordinator=coordinator,
-                    name=switch_conf["name"],
-                    list_id=list_id,
-                    byte_offset=switch_conf["byte_offset"],
-                    bit_offset=switch_conf["bit_offset"],
-                    device_class=switch_conf.get("device_class"),
-                    icon=switch_conf.get("icon"),
-                    force_update=switch_conf.get("force_update", False),
-                    entity_category=switch_conf.get("entity_category"),
-                    enabled_by_default=switch_conf.get("enabled_by_default", True),
-                )
-            )
+    coordinator = device["coordinator"]
+
+    entities = [
+        NetVarSwitch(coordinator, variable)
+        for variable in coordinator.variables
+        if variable["entity"] == "switch"
+    ]
+
     async_add_entities(entities)
 
-class NetVarSwitch(SwitchEntity):
-    def __init__(self, coordinator, name, list_id, byte_offset, bit_offset, device_class, icon, force_update, entity_category, enabled_by_default):
-        self._coordinator = coordinator
-        self._attr_name = name
-        self._list_id = list_id
-        self._byte_offset = byte_offset
-        self._bit_offset = bit_offset
-        
-        self._attr_force_update = force_update
-        self._attr_unique_id = f"{DOMAIN}_{list_id}_{slugify(name)}"
-        
-        self._attr_device_class = device_class
-        self._attr_icon = icon
-        self._attr_entity_category = entity_category
-        self._attr_entity_registry_enabled_default = enabled_by_default
-        self._is_on = False
-        self.current_payload = bytearray(100)
 
-    async def async_added_to_hass(self):
-        self._coordinator.register_listener(self._handle_update)
+class NetVarSwitch(NetVarEntity, SwitchEntity):
+    def __init__(self, coordinator, variable):
+        super().__init__(coordinator, variable)
 
-    async def async_will_remove_from_hass(self):
-        self._coordinator.unregister_listener(self._handle_update)
+        self._attr_device_class = variable.get("device_class")
+        self._attr_is_on = bool(
+            variable.get("initial_value", False)
+        )
 
-    def _handle_update(self, payload: bytes):
-        if len(payload) <= self._byte_offset:
-            return
-        self.current_payload = bytearray(payload)
-        mask = 1 << self._bit_offset
-        self._is_on = bool(payload[self._byte_offset] & mask)
+    def _update_value(self, value):
+        self._attr_is_on = bool(value)
         self.schedule_update_ha_state()
 
-    @property
-    def is_on(self) -> bool:
-        return self._is_on
-
     async def async_turn_on(self, **kwargs):
-        mask = 1 << self._bit_offset
-        if len(self.current_payload) <= self._byte_offset:
-            self.current_payload.extend(b'\x00' * (self._byte_offset + 1 - len(self.current_payload)))
-        self.current_payload[self._byte_offset] |= mask
-        self._coordinator.update_payload_bytes(self._byte_offset, bytes([self.current_payload[self._byte_offset]]))
-        self._coordinator.send_frame()
+        self.coordinator.set_variable(self.variable, True)
+        self._attr_is_on = True
+        self.schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs):
-        mask = 1 << self._bit_offset
-        if len(self.current_payload) <= self._byte_offset:
-            self.current_payload.extend(b'\x00' * (self._byte_offset + 1 - len(self.current_payload)))
-        self.current_payload[self._byte_offset] &= ~mask
-        self._coordinator.update_payload_bytes(self._byte_offset, bytes([self.current_payload[self._byte_offset]]))
-        self._coordinator.send_frame()
+        self.coordinator.set_variable(self.variable, False)
+        self._attr_is_on = False
+        self.schedule_update_ha_state()
