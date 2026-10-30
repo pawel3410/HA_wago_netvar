@@ -1,4 +1,3 @@
-
 import math
 import struct
 
@@ -16,16 +15,12 @@ def get_size(var_type):
 
 def _to_integer(value, var_type):
     if isinstance(value, bool):
-        raise ValueError(f"{var_type} value must be an integer")
+        raise ValueError(f"{var_type} value must be numeric")
 
     try:
         number = int(value)
-        numeric_value = float(value)
     except (TypeError, ValueError, OverflowError):
         raise ValueError(f"Invalid {var_type} value: {value}")
-
-    if not math.isfinite(numeric_value) or numeric_value != number:
-        raise ValueError(f"{var_type} value must be an integer")
 
     return number
 
