@@ -1,0 +1,59 @@
+
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wago NetVar UDP",
+        "description": "Configure a WAGO NetVar UDP list.",
+        "data": {
+          "ip_address": "PLC IP address",
+          "port": "UDP port",
+          "list_id": "NetVar List ID",
+          "mode": "List mode",
+          "pack_variables": "Packed variables",
+          "transmit_checksum": "Transmit checksum"
+        }
+      },
+      "variables": {
+        "title": "Variable configuration",
+        "description": "Add variables to this NetVar list or finish the configuration.",
+        "menu_options": {
+          "add_variable": "Add variable",
+          "finish": "Finish configuration"
+        }
+      },
+      "add_variable": {
+        "title": "Add NetVar variable",
+        "description": "Enter the variable properties. Offset is the byte position in the PLC data buffer.",
+        "data": {
+          "name": "Variable name",
+          "offset": "Byte offset",
+          "type": "PLC data type",
+          "entity": "Home Assistant entity type",
+          "initial_value": "Initial value",
+          "device_class": "Device class",
+          "state_class": "State class",
+          "unit_of_measurement": "Unit of measurement",
+          "icon": "Icon",
+          "enabled_by_default": "Enable entity by default",
+          "force_update": "Force state updates",
+          "zero_as_unavailable": "Treat zero as unavailable",
+          "min": "Minimum value",
+          "max": "Maximum value",
+          "step": "Step"
+        }
+      },
+      "finish": {
+        "title": "Finish configuration",
+        "description": "Confirm to validate and save the NetVar list.",
+        "data": {
+          "confirm": "Confirm configuration"
+        }
+      }
+    },
+    "error": {
+      "invalid_config": "Invalid configuration. Check the PLC address, list ID and variable definitions.",
+      "no_variables": "Add at least one variable before finishing."
+    }
+  }
+}
