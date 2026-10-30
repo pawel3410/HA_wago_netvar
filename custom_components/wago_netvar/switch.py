@@ -1,9 +1,16 @@
+
+import logging
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import NetVarEntity
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _get_yaml_entities(hass):
@@ -69,14 +76,43 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
 
     def _update_value(self, value):
         self._attr_is_on = bool(value)
-        self.schedule_update_ha_state()
 
     async def async_turn_on(self, **kwargs):
-        self.coordinator.set_variable(self.variable, True)
+        try:
+            self.coordinator.set_variable(
+                self.variable,
+                True,
+            )
+
+        except (ValueError, OSError) as err:
+            _LOGGER.error(
+                "Cannot turn on %s: %s",
+                self.variable["name"],
+                err,
+            )
+            raise HomeAssistantError(
+                f"Cannot send value to PLC: {err}"
+            ) from err
+
         self._attr_is_on = True
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
-        self.coordinator.set_variable(self.variable, False)
+        try:
+            self.coordinator.set_variable(
+                self.variable,
+                False,
+            )
+
+        except (ValueError, OSError) as err:
+            _LOGGER.error(
+                "Cannot turn off %s: %s",
+                self.variable["name"],
+                err,
+            )
+            raise HomeAssistantError(
+                f"Cannot send value to PLC: {err}"
+            ) from err
+
         self._attr_is_on = False
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
