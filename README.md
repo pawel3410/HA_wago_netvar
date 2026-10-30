@@ -1,120 +1,170 @@
-# Wago NetVar UDP Integration dla Home Assistant
+# Wago NetVar UDP - Home Assistant
 
-Niestandardowa integracja dla Home Assistanta umożliwiająca dwukierunkową komunikację ze sterownikami PLC **Wago / CoDeSys** za pomocą protokołu **NetVar UDP (.S3)** z poziomu pliku `configuration.yaml`.
+Integracja Home Assistant do komunikacji UDP ze sterownikami
+WAGO / CoDeSys wykorzystującymi protokół NetVar UDP (.S3).
 
----
+## Funkcje
 
-## 📋 Obsługiwane typy zmiennych i rozmiary
+- Odbieranie danych z PLC.
+- Wysyłanie danych z Home Assistant do PLC.
+- Tryb `read` oraz `write`.
+- Pakiety pakowane i niepakowane.
+- Obsługa wielu list NetVar.
+- Obsługa wielu sterowników.
+- Konfiguracja YAML.
+- Konfiguracja przez interfejs Home Assistant.
+- Kodowanie little-endian.
 
-Podczas konfiguracji czujników (`sensors`) oraz pól numerycznych (`numbers`) należy podać odpowiedni rozmiar w bajtach (`size`) w zależności od typu zmiennej w sterowniku PLC:
+## Obsługiwane typy
 
-| Typ w CoDeSys | Opis / Zastosowanie | Rozmiar (`size`) | Uwagi |
-| :--- | :--- | :--- | :--- |
-| **BOOL** | Zmienna bólana / bitowa | *Użyj sekcji `switches`* | Wymaga podania `byte_offset` oraz `bit_offset` (0–7) |
-| **INT** | Liczba całkowita 16-bit (ze znakiem) | `2` bajty | Domyślnie Little-Endian (możliwość zmiany na Big-Endian) |
-| **UINT** | Liczba całkowita 16-bit (bez znaku) | `2` bajty | Domyślnie Little-Endian |
-| **DINT** | Liczba całkowita 32-bit (ze znakiem) | `4` bajty | Domyślnie Little-Endian |
-| **UDINT** | Liczba całkowita 32-bit (bez znaku) | `4` bajty | Domyślnie Little-Endian |
-| **REAL** | Liczba zmiennoprzecinkowa (float) | `4` bajty | Standard IEEE 754 |
+| Typ | Rozmiar | Interpretacja |
+|---|---:|---|
+| BOOL | 1 bajt | 0 = false, wartość niezerowa = true |
+| BYTE | 1 bajt | unsigned |
+| INT | 2 bajty | signed |
+| UINT | 2 bajty | unsigned |
+| DINT | 4 bajty | signed |
+| UDINT | 4 bajty | unsigned |
+| DWORD | 4 bajty | unsigned |
+| REAL | 4 bajty | IEEE 754 float |
 
----
+Wszystkie typy wielobajtowe są kodowane w kolejności little-endian.
 
-## ⚙️ Konfiguracja (`configuration.yaml`)
+## Instalacja
 
-### Schemat parametrów
-* `ip_address`: Adres IP sterownika PLC (używany do wysyłki ramek zwrotnych `[TX]`).
-* `port`: Port UDP (domyślnie `1202`).
-* `list_id`: Identyfikator listy NetVar zgodny z CoDeSys (dawniej COB-ID).
-* `big_endian`: Endianizm payloadu (`true` dla Big Endian, `false` dla **Little Endian** — domyślnie `false`).
+Skopiuj katalog:
 
----
+`custom_components/wago_netvar`
 
-## 💡 Przykłady konfiguracji
+do katalogu konfiguracji Home Assistant:
 
-### Przykład: Obsługa dwóch różnych list NetVar z jednego lub wielu sterowników
+`config/custom_components/wago_netvar`
 
-Poniższy przykład pokazuje konfigurację dwóch niezależnych strumieni danych (`list_id: 126` oraz `list_id: 127`), z których każdy może zawierać własny zestaw czujników, przełączników i suwaków:
+Następnie uruchom ponownie Home Assistant.
+
+## Konfiguracja YAML
+
+Przykład listy odczytowej:
 
 ```yaml
 wago_netvar:
-  # Pierwsza lista NetVar (np. dane klimatyczne i sterowanie oświetleniem)
-  - ip_address: "192.168.17.25"
+  - ip_address: "192.168.17.45"
     port: 1202
-    list_id: 126
-    var_count: 3
-    big_endian: false # Little Endian (domyślnie)
-    
-    sensors:
-      - name: "Temperatura Salon"
-        byte_offset: 0
-        size: 4
-        var_type: "REAL"
-        device_class: "temperature"
-        state_class: "measurement"
+    list_id: 123
+    mode: read
+    pack_variables: true
+
+    variables:
+      - name: "Temperatura"
+        offset: 0
+        type: REAL
+        entity: sensor
+        device_class: temperature
+        state_class: measurement
         unit_of_measurement: "°C"
-        icon: "mdi:thermometer"
-        force_update: true
 
-    switches:
-      - name: "Światło Salon"
-        byte_offset: 4
-        bit_offset: 0
-        icon: "mdi:lightbulb"
+      - name: "Stan pompy"
+        offset: 4
+        type: BOOL
+        entity: binary_sensor
 
-    numbers:
-      - name: "Zadana Temperatura Salon"
-        byte_offset: 6
-        var_type: "REAL"
-        min: 15.0
-        max: 30.0
+Przykład listy zapisu:
+
+wago_netvar:
+  - ip_address: "192.168.17.45"
+    port: 1202
+    list_id: 124
+    mode: write
+    pack_variables: false
+
+    variables:
+      - name: "Pompa"
+        offset: 0
+        type: BOOL
+        entity: switch
+        initial_value: false
+
+      - name: "Temperatura zadana"
+        offset: 1
+        type: REAL
+        entity: number
+        initial_value: 20.0
+        min: 0
+        max: 100
         step: 0.5
         unit_of_measurement: "°C"
-        icon: "mdi:thermostat"
 
-  # Druga niezależna lista NetVar (np. parametry kotłowni / energii)
-  - ip_address: "192.168.17.25"
-    port: 1202
-    list_id: 127
-    var_count: 2
-    big_endian: false
-    
-    sensors:
-      - name: "Temperatura Kotła"
-        byte_offset: 0
-        size: 4
-        var_type: "REAL"
-        device_class: "temperature"
-        state_class: "measurement"
-        unit_of_measurement: "°C"
-        icon: "mdi:fire"
-        force_update: true
+Parametry listy
+Parametr	Znaczenie
+ip_address	Adres IP PLC
+port	Port UDP, domyślnie 1202
+list_id	Identyfikator listy NetVar
+mode	read albo write
+pack_variables	true - cały bufor w jednej ramce; false - osobna ramka dla zmiennej
 
-      - name: "Ciśnienie w Instalacji"
-        byte_offset: 4
-        size: 4
-        var_type: "REAL"
-        device_class: "pressure"
-        state_class: "measurement"
-        unit_of_measurement: "bar"
-        icon: "mdi:gauge"
-        force_update: true
+Parametry zmiennej
+Parametr	Znaczenie
+name	Nazwa encji
+offset	Pozycja w buforze w bajtach
+type	Typ danych PLC
+entity	sensor, binary_sensor, switch albo number
+initial_value	Początkowa wartość bufora w trybie write
+min	Minimalna wartość encji number
+max	Maksymalna wartość encji number
+step	Krok encji number
+device_class	Klasa urządzenia
+state_class	Klasa stanu sensora
+unit_of_measurement	Jednostka
+icon	Ikona
+zero_as_unavailable	Traktowanie zera jako braku wartości sensora
 
-```
+Nie używa się bit_offset ani big_endian.
+Konfiguracja przez UI
+W formularzu integracji podaj:
+- adres IP sterownika,
+- port UDP,
+- List ID,
+- tryb read lub write,
+- ustawienie pack_variables,
+- listę zmiennych w formacie JSON.
+Przykład JSON:
 
----
+[
+  {
+    "name": "Temperatura",
+    "offset": 0,
+    "type": "REAL",
+    "entity": "sensor",
+    "device_class": "temperature",
+    "state_class": "measurement",
+    "unit_of_measurement": "°C"
+  },
+  {
+    "name": "Pompa",
+    "offset": 4,
+    "type": "BOOL",
+    "entity": "binary_sensor"
+  }
+]
 
-## 🔍 Diagnostyka i Logowanie
+Format ramki
+Nagłówek ma 20 bajtów.
+Bajty	Znaczenie
+0-3	Sygnatura 00 2D 53 33
+8-9	List ID
+10-11	Indeks zmiennej
+12-13	Liczba zmiennych
+14-15	Długość całej ramki
+16-17	Numer sekwencyjny
+18-19	Pole pozostawione bez obsługi
+20...	Dane
 
-Aby włączyć podgląd przychodzących pakietów `[RX]` (wraz z numerem portu, `list-ID` oraz podglądem payloadu w formacie HEX) w logach Home Assistanta, dodaj do pliku `configuration.yaml`:
+Dla pakietów niepakowanych indeks zmiennej wskazuje jej pozycję
+na skonfigurowanej liście, a liczba zmiennych wynosi 1.
+Ograniczenia
+- Obsługa checksum nie jest zaimplementowana.
+- initial_value inicjalizuje bufor zapisu, ale nie jest automatycznie
+  wysyłane do PLC podczas uruchamiania Home Assistant.
+- Format ramek TX wymaga potwierdzenia przechwyceniem pakietów
+  wysyłanych z Home Assistant do PLC.
 
-```yaml
-logger:
-  default: warning
-  logs:
-    custom_components.wago_netvar: info
-
-```
-
-```
-
-```
