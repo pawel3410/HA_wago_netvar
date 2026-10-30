@@ -67,6 +67,7 @@ wago_netvar:
         offset: 4
         type: BOOL
         entity: binary_sensor
+```yaml
 
 Przykład listy zapisu:
 
@@ -127,6 +128,7 @@ W formularzu integracji podaj:
 - tryb read lub write,
 - ustawienie pack_variables,
 - listę zmiennych w formacie JSON.
+
 Przykład JSON:
 
 [
