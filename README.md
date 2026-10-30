@@ -78,8 +78,10 @@ wago_netvar:
         offset: 4
         type: BOOL
         entity: binary_sensor
+```
 
 Przyklad listy zapisu:
+```yaml
 wago_netvar:
   - ip_address: "192.168.17.45"
     port: 1202
@@ -104,6 +106,7 @@ wago_netvar:
         max: 100
         step: 0.5
         unit_of_measurement: "°C"
+```
 
 Parametry listy
 Parametr	Znaczenie
