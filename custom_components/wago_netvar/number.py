@@ -1,9 +1,17 @@
+
+import logging
+import math
+
 from homeassistant.components.number import NumberEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import NetVarEntity
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _get_yaml_entities(hass):
@@ -65,9 +73,11 @@ class NetVarNumber(NetVarEntity, NumberEntity):
         self._attr_native_min_value = float(
             variable.get("min", 0)
         )
+
         self._attr_native_max_value = float(
             variable.get("max", 100)
         )
+
         self._attr_native_step = float(
             variable.get("step", 1)
         )
@@ -75,26 +85,77 @@ class NetVarNumber(NetVarEntity, NumberEntity):
         self._attr_native_unit_of_measurement = variable.get(
             "unit_of_measurement"
         )
+
         self._attr_device_class = variable.get("device_class")
 
-        self._attr_native_value = float(
+        initial_value = float(
             variable.get("initial_value", 0)
         )
 
+        if not math.isfinite(initial_value):
+            initial_value = self._attr_native_min_value
+
+        self._attr_native_value = min(
+            max(
+                initial_value,
+                self._attr_native_min_value,
+            ),
+            self._attr_native_max_value,
+        )
+
     def _update_value(self, value):
-        self._attr_native_value = value
-        self.schedule_update_ha_state()
+        try:
+            number = float(value)
+
+        except (TypeError, ValueError, OverflowError):
+            return
+
+        if not math.isfinite(number):
+            return
+
+        self._attr_native_value = number
 
     async def async_set_native_value(self, value):
-        value = float(value)
+        try:
+            number = float(value)
 
-        if value < self._attr_native_min_value:
-            raise ValueError("Value is below minimum")
+        except (TypeError, ValueError, OverflowError) as err:
+            raise HomeAssistantError(
+                "Invalid numeric value"
+            ) from err
 
-        if value > self._attr_native_max_value:
-            raise ValueError("Value is above maximum")
+        if not math.isfinite(number):
+            raise HomeAssistantError(
+                "Numeric value must be finite"
+            )
 
-        self.coordinator.set_variable(self.variable, value)
+        if number < self._attr_native_min_value:
+            raise HomeAssistantError(
+                "Value is below minimum"
+            )
 
-        self._attr_native_value = value
-        self.schedule_update_ha_state()
+        if number > self._attr_native_max_value:
+            raise HomeAssistantError(
+                "Value is above maximum"
+            )
+
+        try:
+            self.coordinator.set_variable(
+                self.variable,
+                number,
+            )
+
+        except (ValueError, OSError) as err:
+            _LOGGER.error(
+                "Cannot set %s to %s: %s",
+                self.variable["name"],
+                number,
+                err,
+            )
+
+            raise HomeAssistantError(
+                f"Cannot send value to PLC: {err}"
+            ) from err
+
+        self._attr_native_value = number
+        self.async_write_ha_state()
