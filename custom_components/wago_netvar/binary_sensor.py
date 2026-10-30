@@ -1,3 +1,4 @@
+
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -63,8 +64,7 @@ class NetVarBinarySensor(NetVarEntity, BinarySensorEntity):
         super().__init__(coordinator, variable)
 
         self._attr_device_class = variable.get("device_class")
-        self._attr_is_on = False
+        self._attr_is_on = None
 
     def _update_value(self, value):
         self._attr_is_on = bool(value)
-        self.schedule_update_ha_state()
