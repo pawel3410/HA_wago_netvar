@@ -1,3 +1,4 @@
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -64,16 +65,18 @@ class NetVarSensor(NetVarEntity, SensorEntity):
 
         self._attr_device_class = variable.get("device_class")
         self._attr_state_class = variable.get("state_class")
+
         self._attr_native_unit_of_measurement = variable.get(
             "unit_of_measurement"
         )
+
         self._attr_suggested_display_precision = variable.get(
             "suggested_display_precision"
         )
 
         self._zero_as_unavailable = variable.get(
             "zero_as_unavailable",
-            True,
+            False,
         )
 
         self._attr_native_value = None
@@ -83,5 +86,3 @@ class NetVarSensor(NetVarEntity, SensorEntity):
             self._attr_native_value = None
         else:
             self._attr_native_value = value
-
-        self.schedule_update_ha_state()
