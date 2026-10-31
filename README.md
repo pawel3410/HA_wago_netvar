@@ -1,22 +1,24 @@
+
 # Wago NetVar UDP - Home Assistant
 
-Integracja Home Assistant do komunikacji UDP ze sterownikami
-WAGO / CoDeSys wykorzystujacymi protokol NetVar UDP (.S3).
+Integracja Home Assistant do komunikacji UDP ze sterownikami WAGO / CoDeSys wykorzystujacymi protokol NetVar UDP (.S3).
 
 ## Funkcje
 
 - Odbieranie danych z PLC.
 - Wysylanie danych z Home Assistant do PLC.
 - Tryb `read` oraz `write`.
-- Pakiety pakowane i niepakowane.
+- Obsluga pakietow pakowanych i niepakowanych.
 - Obsluga wielu list NetVar.
 - Obsluga wielu sterownikow.
 - Konfiguracja YAML.
 - Konfiguracja przez interfejs Home Assistant.
 - Kodowanie little-endian.
 - Aktualizacja encji po kazdej poprawnej ramce UDP.
-- Automatyczny sensor diagnostyczny kompletności listy.
+- Diagnostyka kompletności listy.
 - Informacja o numerze cyklu i brakujacych indeksach zmiennych.
+- Obsluga 16-bitowego licznika `sequence`, w tym jego przepełnienia.
+- Rozpoznawanie cofniecia numeracji jako restartu PLC.
 
 ## Obslugiwane typy
 
@@ -40,6 +42,73 @@ Przyklad:
 - `12.9` -> `12`
 - `-12.9` -> `-12`
 
+## Obsluga BOOL
+
+Typ `BOOL` zajmuje zawsze **jeden pelny bajt payload**.
+
+Nie jest stosowane pakowanie zmiennych BOOL w pojedyncze bity bajtu. Kazda zmienna BOOL ma wlasny bajt w buforze danych PLC.
+
+Nie stosuje sie `bit_offset`. Pozycje zmiennych okresla wylacznie parametr `offset`, podawany w bajtach.
+
+### Odczyt BOOL z PLC
+
+W trybie `read` wartosc BOOL jest odczytywana z jednego bajtu payload:
+
+| Wartosc bajtu | Wartosc logiczna |
+|---|---|
+| `0x00` | `false` |
+| `0x01` | `true` |
+| Inna wartosc niezerowa | `true` |
+
+W trybie niepakowanym ramka zawierajaca jedna zmienna BOOL ma:
+- 20 bajtow naglowka,
+- 1 bajt payload,
+- lacznie 21 bajtow.
+
+W trybie pakowanym kazda zmienna BOOL zajmuje jeden bajt w buforze calej listy.
+
+### Zapis BOOL do PLC
+
+W trybie `write` Home Assistant koduje wartosc logiczna do jednego bajtu:
+
+| Wartosc logiczna | Bajt wysylany do PLC |
+|---|---|
+| `false` | `0x00` |
+| `true` | `0x01` |
+
+W trybie niepakowanym wysylana ramka zawiera jeden bajt payload dla zmiennej BOOL.
+
+W trybie pakowanym wartosc BOOL jest zapisywana pod odpowiednim offsetem w buforze calej listy. Pozostale bajty bufora nie sa przesuwane ani modyfikowane przez zapis tej zmiennej.
+
+### Rozmieszczenie BOOL w payload
+
+Przykladowa lista:
+
+| Zmienna | Typ | Offset | Rozmiar |
+|---|---|---:|---:|
+| Pompa | BOOL | 0 | 1 bajt |
+| Alarm | BOOL | 1 | 1 bajt |
+| Temperatura | REAL | 2 | 4 bajty |
+| Licznik | DWORD | 6 | 4 bajty |
+
+Rozmieszczenie bajtow:
+
+```text
+Offset:    0       1       2       3       4       5       6       7       8       9
+Payload:  BOOL    BOOL    REAL            ...             DWORD
+```
+
+W powyzszym przykladzie:
+- `Pompa` zajmuje bajt 0.
+- `Alarm` zajmuje bajt 1.
+- `Temperatura` zajmuje bajty 2-5.
+- `Licznik` zajmuje bajty 6-9.
+- Calkowity rozmiar payload wynosi 10 bajtow.
+
+Dwie zmienne BOOL zajmuja zatem dwa bajty, a nie jeden bajt z dwoma bitami.
+
+**Wazne:** offset nastepnej zmiennej musi uwzgledniac pelny bajt zajmowany przez kazda zmienna BOOL.
+
 ## Instalacja
 
 Skopiuj katalog:
@@ -54,7 +123,7 @@ Nastepnie uruchom ponownie Home Assistant.
 
 ## Konfiguracja YAML
 
-Przyklad listy odczytowej:
+### Przyklad listy odczytowej
 
 ```yaml
 wago_netvar:
@@ -78,9 +147,15 @@ wago_netvar:
         offset: 4
         type: BOOL
         entity: binary_sensor
+
+      - name: "Alarm"
+        offset: 5
+        type: BOOL
+        entity: binary_sensor
 ```
 
-Przyklad listy zapisu:
+### Przyklad listy zapisu
+
 ```yaml
 wago_netvar:
   - ip_address: "192.168.17.45"
@@ -97,8 +172,14 @@ wago_netvar:
         entity: switch
         initial_value: false
 
-      - name: "Temperatura zadana"
+      - name: "Alarm"
         offset: 1
+        type: BOOL
+        entity: switch
+        initial_value: false
+
+      - name: "Temperatura zadana"
+        offset: 2
         type: REAL
         entity: number
         initial_value: 20.0
@@ -108,199 +189,243 @@ wago_netvar:
         unit_of_measurement: "°C"
 ```
 
-Parametry listy
-Parametr	Znaczenie
-ip_address	Adres IP PLC
-port	Port UDP, domyslnie 1202
-list_id	Identyfikator listy NetVar
-mode	read albo write
-pack_variables	true - caly bufor w jednej ramce; false - osobna ramka dla zmiennej
-transmit_checksum	Ustawienie dotyczace checksum w transmisji
+### Parametry listy
 
-Parametry zmiennej
-Parametr	Znaczenie
-name	Nazwa encji
-offset	Pozycja w buforze w bajtach
-type	Typ danych PLC
-entity	sensor, binary_sensor, switch albo number
-initial_value	Poczatkowa wartosc bufora w trybie write
-min	Minimalna wartosc encji number
-max	Maksymalna wartosc encji number
-step	Krok encji number
-device_class	Klasa urzadzenia
-state_class	Klasa stanu sensora
-unit_of_measurement	Jednostka
-icon	Ikona
-zero_as_unavailable	Traktowanie zera jako braku wartosci sensora
+| Parametr | Znaczenie |
+|---|---|
+| ip_address | Adres IP PLC |
+| port | Port UDP, domyslnie 1202 |
+| list_id | Identyfikator listy NetVar |
+| mode | `read` albo `write` |
+| pack_variables | `true` - caly bufor w jednej ramce; `false` - osobna ramka dla zmiennej |
+| transmit_checksum | Ustawienie dotyczace checksum w transmisji |
 
-Nie uzywa sie bit_offset ani big_endian.
-Automatyczny sensor diagnostyczny
-Dla kazdej listy w trybie read integracja tworzy dodatkowy sensor:
+### Parametry zmiennej
 
-sensor.netvar_list_<list_id>_packet_status
+| Parametr | Znaczenie |
+|---|---|
+| name | Nazwa encji |
+| offset | Pozycja w buforze w bajtach |
+| type | Typ danych PLC |
+| entity | `sensor`, `binary_sensor`, `switch` albo `number` |
+| initial_value | Poczatkowa wartosc bufora w trybie write |
+| min | Minimalna wartosc encji number |
+| max | Maksymalna wartosc encji number |
+| step | Krok encji number |
+| device_class | Klasa urzadzenia |
+| state_class | Klasa stanu sensora |
+| unit_of_measurement | Jednostka |
+| icon | Ikona |
+| zero_as_unavailable | Traktowanie zera jako braku wartosci sensora |
 
-Rzeczywisty identyfikator encji zalezy od nazwy nadanej przez Home Assistant.
+Nie uzywa sie `bit_offset` ani `big_endian`.
+
+## Aktualizacja danych i cykle NetVar
+
+Integracja aktualizuje dane po kazdej poprawnej ramce UDP.
+
+W trybie niepakowanym kazda ramka zawiera dane jednej zmiennej. Po jej odebraniu odpowiednia encja jest aktualizowana natychmiast. Nie trzeba czekac na odebranie wszystkich zmiennych z listy.
+
+Pozostale encje zachowuja ostatnie odebrane wartosci. Brak ramki dla danej zmiennej nie powoduje wyzerowania jej wartosci.
+
+W trybie pakowanym jedna ramka zawiera dane calego skonfigurowanego bufora listy. Po odebraniu poprawnej ramki aktualizowane sa encje wszystkich zmiennych.
+
+### Numer sequence
+
+Pole `sequence` jest 16-bitowym numerem cyklu listy.
+
+Wszystkie ramki nalezace do tego samego cyklu maja ten sam numer `sequence`.
+
+Zasady obslugi:
+
+- Pierwsza odebrana ramka rozpoczyna cykl.
+- Kolejne ramki z tym samym numerem `sequence` naleza do tego samego cyklu.
+- Zmiana numeru `sequence` rozpoczyna nowy cykl.
+- Przejscie z `65535` na `0` jest traktowane jako normalne przepełnienie licznika.
+- Cofniecie numeracji, ktore nie jest normalnym przepełnieniem, jest traktowane jako restart licznika PLC.
+- Po wykryciu restartu rozpoczyna sie nowy cykl diagnostyczny.
+
+Integracja nie wymaga, aby pierwszy odebrany numer cyklu wynosil `0` lub `1`.
+
+Nie jest wymagane odebranie wszystkich ramek poprzedniego cyklu przed rozpoczeciem kolejnego. Jezeli jakas ramka nie dotrze, zmienna zostanie wykazana jako brakujaca w diagnostyce biezacego cyklu.
+
+### Automatyczny sensor diagnostyczny
+
+Dla kazdej listy w trybie `read` integracja tworzy dodatkowy sensor diagnostyczny kompletności listy.
 
 Stan:
-- complete - odebrano wszystkie zmienne z biezacego cyklu.
-- incomplete - nie odebrano jeszcze wszystkich zmiennych z biezacego cyklu.
-Atrybuty:
-- list_id - identyfikator listy.
-- sequence - numer cyklu.
-- received_count - liczba odebranych zmiennych w cyklu.
-- expected_count - liczba skonfigurowanych zmiennych.
-- received_indices - indeksy odebranych zmiennych.
-- missing_indices - indeksy brakujacych zmiennych.
-- ever_received_count - liczba zmiennych odebranych przynajmniej raz.
-- packed - tryb pakowania.
-- checksum_field - wartosc pola checksum z ostatniej ramki.
-W trybie niepakowanym kazda poprawna ramka aktualizuje odpowiednia encje
-natychmiast po odbiorze. Pozostale encje zachowuja ostatnia odebrana wartosc.
+- `complete` - odebrano wszystkie zmienne z biezacego cyklu.
+- `incomplete` - nie odebrano jeszcze wszystkich zmiennych z biezacego cyklu.
 
-Kompletnosc cyklu jest obliczana na podstawie liczby roznych indeksow
-odebranych dla tego samego numeru sequence.
+Atrybuty diagnostyczne powinny obejmowac:
+- `list_id` - identyfikator listy.
+- `sequence` - numer biezacego cyklu.
+- `received_count` - liczba odebranych zmiennych w cyklu.
+- `expected_count` - liczba skonfigurowanych zmiennych.
+- `received_indices` - indeksy odebranych zmiennych.
+- `missing_indices` - indeksy brakujacych zmiennych.
+- `ever_received_count` - liczba zmiennych odebranych przynajmniej raz.
+- `packed` - tryb pakowania.
+- `checksum_field` - wartosc pola checksum z ostatniej ramki.
 
-Jesli zmieni sie numer sequence, rozpoczyna sie nowy cykl.
-Nieodebrane zmienne poprzedniego cyklu pozostaja widoczne jako brakujace
-w diagnostyce tego cyklu.
-Struktura ramki NetVar UDP
+W trybie niepakowanym kompletność cyklu jest obliczana na podstawie liczby roznych indeksow odebranych dla tego samego numeru `sequence`.
+
+Przyklad dla listy zawierajacej 12 zmiennych:
+
+- Po pierwszej ramce: `received_count: 1`, `expected_count: 12`.
+- Po odebraniu szesciu roznych zmiennych: `received_count: 6`.
+- Po odebraniu wszystkich dwunastu zmiennych: stan `complete`.
+
+Po rozpoczeciu nowego cyklu licznik odebranych zmiennych jest liczony od nowa. Wartosci encji pozostaja bez zmian do czasu odebrania kolejnych ramek.
+
+## Struktura ramki NetVar UDP
+
 Przechwycone ramki maja sygnature:
 
-00 2D 53 33
+`00 2D 53 33`
 
 Naglowek ma 20 bajtow.
-Offset	Rozmiar	Znaczenie
-0	4 bajty	Sygnatura 00 2D 53 33
-4	4 bajty	Pole nieznane / zarezerwowane
-8	2 bajty	List ID
-10	2 bajty	Indeks zmiennej
-12	2 bajty	Liczba zmiennych
-14	2 bajty	Dlugosc calej ramki
-16	2 bajty	Numer sequence / cyklu
-18	2 bajty	Pole checksum lub pole kontrolne
-20	zmienna	Dane zmiennej lub bufor listy
+
+| Offset | Rozmiar | Znaczenie |
+|---:|---:|---|
+| 0 | 4 bajty | Sygnatura `00 2D 53 33` |
+| 4 | 4 bajty | Pole nieznane / zarezerwowane |
+| 8 | 2 bajty | List ID |
+| 10 | 2 bajty | Indeks zmiennej |
+| 12 | 2 bajty | Liczba zmiennych |
+| 14 | 2 bajty | Dlugosc calej ramki |
+| 16 | 2 bajty | Numer sequence / cyklu |
+| 18 | 2 bajty | Pole checksum lub pole kontrolne |
+| 20 | zmienna | Dane zmiennej lub bufor listy |
 
 Wszystkie wielobajtowe pola naglowka sa zapisane little-endian.
-List ID
+
+### List ID
+
 Identyfikator listy NetVar.
-Indeks zmiennej
-W trybie niepakowanym indeks wskazuje pozycje zmiennej na skonfigurowanej
-liscie. Indeksowanie rozpoczyna sie od zera.
+
+### Indeks zmiennej
+
+W trybie niepakowanym indeks wskazuje pozycje zmiennej na skonfigurowanej liscie. Indeksowanie rozpoczyna sie od zera.
 
 W trybie pakowanym indeks wynosi zero.
-Liczba zmiennych
+
+### Liczba zmiennych
+
 W trybie pakowanym pole zawiera liczbe wszystkich zmiennych na liscie.
 
 Przyklad:
-- 11 zmiennych: 0B 00
-- 12 zmiennych: 0C 00
-W trybie niepakowanym pole ma wartosc 1 w kazdej ramce.
-Nie oznacza ono liczby wszystkich zmiennych na liscie.
+- 11 zmiennych: `0B 00`
+- 12 zmiennych: `0C 00`
+
+W trybie niepakowanym pole ma wartosc `1` w kazdej ramce. Nie oznacza ono liczby wszystkich zmiennych na liscie.
+
 Liczbe oczekiwanych ramek okresla konfiguracja Home Assistant.
-Dlugosc ramki
+
+### Dlugosc ramki
+
 Pole zawiera calkowita dlugosc ramki UDP, lacznie z 20-bajtowym naglowkiem.
 
 Przyklady:
 - BOOL: 21 bajtow.
 - BYTE: 21 bajtow.
-- DWORD: 24 bajty.
+- INT / UINT: 22 bajty.
+- DINT / UDINT / DWORD / REAL: 24 bajty.
+
 W trybie pakowanym dlugosc zalezy od rozmiaru skonfigurowanego bufora.
-Sequence
+
+### Sequence
+
 Pole 16-17 jest numerem cyklu listy, a nie indeksem zmiennej.
 
-Przyklady zaobserwowane w przechwyceniach:
-- 18 00 = sequence 24.
-- 19 00 = sequence 25.
-- 01 00 = sequence 1.
-- 02 00 = sequence 2.
-- 03 00 = sequence 3.
-- 04 00 = sequence 4.
-- 05 00 = sequence 5.
 Numer jest 16-bitowy i moze zawijac sie z 65535 do 0.
 
-Wszystkie zmienne z jednego cyklu maja ten sam numer sequence.
-Dane i rozmiary ramek
+Zmiana numeru sequence rozpoczyna nowy cykl diagnostyczny. Cofniecie numeracji jest traktowane jako restart PLC, z wyjatkiem normalnego przejscia przez granice licznika `65535 -> 0`.
+
+### Dane i rozmiary ramek
+
 Dane zaczynaja sie od offsetu 20.
 
 W trybie niepakowanym:
+
 - BOOL: 1 bajt danych, cala ramka 21 bajtow.
 - BYTE: 1 bajt danych, cala ramka 21 bajtow.
 - INT / UINT: 2 bajty danych, cala ramka 22 bajty.
 - DINT / UDINT / DWORD / REAL: 4 bajty danych, cala ramka 24 bajty.
+
 W trybie pakowanym dane zawieraja skonfigurowany bufor listy.
-Pozycje zmiennych okreslaja ich offset i type.
+
+Pozycje zmiennych okreslaja ich `offset` i `type`.
+
+Kazda zmienna BOOL zajmuje jeden bajt payload. Nie stosuje sie bitowego pakowania zmiennych BOOL.
 
 Przyklad DWORD:
 
 Wartosc PLC:
 
-16#AABBCCDD
+`16#AABBCCDD`
 
 Dane w ramce:
 
-DD CC BB AA
+`DD CC BB AA`
 
 Przyklad REAL jest kodowany jako 32-bit IEEE 754 little-endian.
-Checksum / pole kontrolne
+
+## Checksum / pole kontrolne
+
 Znaczenie pola 18-19 nie zostalo jeszcze w pelni ustalone.
+
 Nie jest obecnie implementowane obliczanie ani weryfikacja algorytmu checksum.
-Tryb checksum wylaczony
+
+### Tryb checksum wylaczony
+
 W przechwyconych ramkach z wylaczona checksum pole 18-19 ma wartosc:
 
-00 00
-Tryb niepakowany z checksum
-W dotychczasowych przechwyceniach zaobserwowano stale wartosci zalezne
-od typu zmiennej:
-Typ	Bajty 18-19
-BOOL	02 52
-BYTE	02 78
-DWORD	02 28
+`00 00`
 
-Wartosci pozostawaly takie same dla roznych wartosci danych oraz roznych
-indeksow zmiennych.
-Tryb pakowany z checksum
+### Tryb niepakowany z checksum
+
+W dotychczasowych przechwyceniach zaobserwowano stale wartosci zalezne od typu zmiennej:
+
+| Typ | Bajty 18-19 |
+|---|---|
+| BOOL | `02 52` |
+| BYTE | `02 78` |
+| DWORD | `02 28` |
+
+Wartosci pozostawaly takie same dla roznych wartosci danych oraz roznych indeksow zmiennych.
+
+### Tryb pakowany z checksum
+
 Zaobserwowano:
-Liczba zmiennych i typy	Pole 18-19
-11 zmiennych: 5 BOOL, 4 DWORD, 2 BYTE	02 DB
-12 zmiennych: 5 BOOL, 4 DWORD, 3 BYTE	02 B3
 
-Dla listy 12 zmiennych wartosc 02 B3 pozostawala niezmienna:
+| Liczba zmiennych i typy | Pole 18-19 |
+|---|---|
+| 11 zmiennych: 5 BOOL, 4 DWORD, 2 BYTE | `02 DB` |
+| 12 zmiennych: 5 BOOL, 4 DWORD, 3 BYTE | `02 B3` |
+
+Dla listy 12 zmiennych wartosc `02 B3` pozostawala niezmienna:
 - po zmianie wartosci zmiennych,
 - przy kolejnych numerach sequence 3, 4 i 5.
-Wyniki wskazuja, ze pole nie zalezy bezposrednio od samych wartosci payload
-ani od numeru sequence w zaobserwowanych probach.
 
-Nie wiadomo jeszcze, czy pole zalezy od konfiguracji listy, typow,
-kolejnosci zmiennych, naglowka lub innego parametru.
+Nie wiadomo jeszcze, czy pole zalezy od konfiguracji listy, typow, kolejnosci zmiennych, naglowka lub innego parametru.
 
-Nie nalezy traktowac tych wartosci jako potwierdzonego algorytmu CRC
-ani sumy kontrolnej.
-Wysylanie ramek z checksum
-Generowanie checksum dla ramek wysylanych przez Home Assistant nie jest
-zaimplementowane, poniewaz algorytm nie zostal potwierdzony.
+Nie nalezy traktowac tych wartosci jako potwierdzonego algorytmu CRC ani sumy kontrolnej.
 
-Ustawienie transmit_checksum: true w trybie write powoduje odmowe
-wyslania ramki zamiast wysylania niepoprawnej wartosci pola kontrolnego.
-Konfiguracja przez UI
-W formularzu integracji podaj:
-- adres IP sterownika,
-- port UDP,
-- List ID,
-- tryb read lub write,
-- ustawienie pack_variables,
-- ustawienie transmit_checksum,
-- zmienne wraz z ich typami, offsetami i encjami.
-Ograniczenia
+### Wysylanie ramek z checksum
+
+Generowanie checksum dla ramek wysylanych przez Home Assistant nie jest zaimplementowane, poniewaz algorytm nie zostal potwierdzony.
+
+Ustawienie `transmit_checksum: true` w trybie `write` powoduje odmowe wyslania ramki zamiast wysylania niepoprawnej wartosci pola kontrolnego.
+
+## Ograniczenia
+
 - Algorytm checksum nie jest jeszcze rozpoznany.
 - Weryfikacja checksum odebranych ramek nie jest wykonywana.
 - Generowanie checksum dla ramek wysylanych nie jest zaimplementowane.
-- initial_value inicjalizuje bufor zapisu, ale nie jest automatycznie
-  wysylane do PLC podczas uruchamiania Home Assistant.
-- Format ramek TX wymaga dalszego potwierdzenia przechwyceniem pakietow
-  wysylanych z Home Assistant do PLC.
+- `initial_value` inicjalizuje bufor zapisu, ale nie jest automatycznie wysylane do PLC podczas uruchamiania Home Assistant.
+- Format ramek TX wymaga dalszego potwierdzenia przechwyceniem pakietow wysylanych z Home Assistant do PLC.
+- Nie ma potwierdzonego mechanizmu retransmisji brakujacych ramek.
+- Diagnostyka kompletności dotyczy odebranych ramek i nie gwarantuje, ze PLC wyslalo wszystkie zmienne.
+- BOOL zajmuje jeden bajt payload. Nie jest stosowane bitowe pakowanie zmiennych BOOL.
 
-Ważne uwagi przed uruchomieniem
-1. Sensor diagnostyczny będzie tworzony automatycznie dla każdej listy read. Nie trzeba dodawać go ręcznie do konfiguracji.
-2. Po pierwszej ramce niepakowanej sensor pokaże incomplete, np. received_count: 1, expected_count: 12.
-3. Po odebraniu wszystkich 12 indeksów tego samego cyklu pokaże complete.
-4. Gdy rozpocznie się następny cykl, diagnostyka zacznie liczyć odebrane zmienne od nowa. Encje zachowają ostatnie wartości, dopóki nie nadejdą ich nowe ramki.
