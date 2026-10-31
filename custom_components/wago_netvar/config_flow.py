@@ -1,4 +1,6 @@
 
+import ipaddress
+
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -13,6 +15,17 @@ from .const import (
     WRITE_ENTITIES,
 )
 from . import validate_device
+
+
+def _validate_ip_address(value):
+    value = str(value).strip()
+
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        raise vol.Invalid("Invalid IP address")
+
+    return value
 
 
 class WagoNetVarConfigFlow(
@@ -38,7 +51,7 @@ class WagoNetVarConfigFlow(
 
         schema = vol.Schema(
             {
-                vol.Required("ip_address"): str,
+                vol.Required("ip_address"): _validate_ip_address,
 
                 vol.Required(
                     "port",
