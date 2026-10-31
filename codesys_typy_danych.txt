@@ -1,0 +1,58 @@
+W środowisku CODESYS 2.3 typy danych bazują na międzynarodowej normie IEC 61131-3. Określają one wielkość rezerwowanej pamięci w sterowniku PLC oraz dopuszczalny zakres wartości.
+
+Poniżej znajduje się zestawienie podstawowych (elementarnych) typów danych podzielonych na kategorie.
+
+---
+
+### 1. Typy logiczne i bitowe (Bitstring)
+
+| Nazwa typu | Rozmiar (w pamięci) | Zakres wartości / Format | Opis |
+| :--- | :--- | :--- | :--- |
+| **BOOL** | 1 bit | `0` lub `1` (`FALSE` / `TRUE`) | Zmienna logiczna (stany we/wy, flagi) |
+| **BYTE** | 8 bitów (1 bajt) | `0` do `255` (`16#00` – `16#FF`) | Ciąg 8 bitów (bez znaku) |
+| **WORD** | 16 bitów (2 bajty) | `0` do `65 535` (`16#0000` – `16#FFFF`) | Ciąg 16 bitów |
+| **DWORD** | 32 bity (4 bajty) | `0` do `4 294 967 295` (`16#00000000` – `16#FFFFFFFF`) | Ciąg 32 bitów |
+
+---
+
+### 2. Całkowite liczbowe (Integer)
+
+Typy całkowite dzielzą się na wersje ze znakiem (mogą przyjmować wartości ujemne) oraz bez znaku (tylko dodatnie).
+
+| Nazwa typu | Rozmiar | Zakres wartości | Opis |
+| :--- | :--- | :--- | :--- |
+| **SINT** | 8 bitów (1 bajt) | `-128` do `127` | Short Integer (ze znakiem) |
+| **USINT** | 8 bitów (1 bajt) | `0` do `255` | Unsigned Short Integer (bez znaku) |
+| **INT** | 16 bitów (2 bajty) | `-32 768` do `32 767` | Integer (ze znakiem) |
+| **UINT** | 16 bitów (2 bajty) | `0` do `65 535` | Unsigned Integer (bez znaku) |
+| **DINT** | 32 bity (4 bajty) | `-2 147 483 648` do `2 147 483 647` | Double Integer (ze znakiem) |
+| **UDINT** | 32 bity (4 bajty) | `0` do `4 294 967 295` | Unsigned Double Integer (bez znaku) |
+
+---
+
+### 3. Liczby zmiennoprzecinkowe (Floating-point)
+
+| Nazwa typu | Rozmiar | Zakres wartości | Opis |
+| :--- | :--- | :--- | :--- |
+| **REAL** | 32 bity (4 bajty) | ok. $\pm1.175494 \cdot 10^{-38}$ do $\pm3.402823 \cdot 10^{38}$ | Liczba zmiennoprzecinkowa pojedynczej precyzji (zgodna z IEEE 754, dokładność do ok. 7 cyfr znaczących) |
+
+---
+
+### 4. Typy czasowe (Time / Date)
+
+Zmienne te służą do obsługi czasu, opóźnień oraz znaczników czasowych zegara RTC w sterowniku.
+
+| Nazwa typu | Rozmiar | Zakres wartości / Format | Opis |
+| :--- | :--- | :--- | :--- |
+| **TIME** | 32 bity (4 bajty) | `0` do `2 147 483 647 ms` | Czas trwania (od `T#0ms` do ok. `49 dni 17h 2m 37s`) |
+| **DATE** | 32 bity (4 bajty) | `D#1970-1-1` do `D#2106-2-7` | Data kalendarzowa |
+| **TIME_OF_DAY** (TOD) | 32 bity (4 bajty) | `TOD#0:0:0` do `TOD#23:59:59.999` | Pora dnia (czas w obrębie doby) |
+| **DATE_AND_TIME** (DT) | 32 bity (4 bajty) | `DT#1970-1-1-0:0:0` do `DT#2106-2-7-6:28:15` | Data wraz z godziną |
+
+---
+
+### 5. Typy tekstowe (Strings)
+
+| Nazwa typu | Rozmiar w pamięci | Opis |
+| :--- | :--- | :--- |
+| **STRING** | Zależny od zadeklarowanej długości (1 bajt na znak + 1 bajt zakończenia) | Ciąg znaków 8-bitowych w standardzie ASCII. Domyślnie, jeśli nie podano długości (np. `VAR str : STRING;`), rezerwowana jest przestrzeń na 80 znaków. Deklaracja z rozmiarem wygląda następująco: `VAR str : STRING(20);` (dla 20 znaków). |
