@@ -1,3 +1,4 @@
+
 import asyncio
 import ipaddress
 import logging
@@ -371,9 +372,6 @@ class NetVarCoordinator:
         # Variables received in the current sequence.
         self.cycle_received = set()
 
-        # Indices updated by the most recent UDP frame.
-        self.last_packet_indices = set()
-
         self.last_sequence = None
         self.current_sequence = None
         self.last_checksum = 0
@@ -437,13 +435,45 @@ class NetVarCoordinator:
         self.cycle_received = set()
 
     def _begin_or_continue_cycle(self, sequence):
+        """Keep frames with the same sequence in one cycle.
+
+        Sequence is a 16-bit counter. A forward change starts a new cycle.
+        A change that moves backwards is treated as a PLC restart.
+        The modular comparison also handles the normal 65535 -> 0 wrap.
+        """
+        sequence &= 0xFFFF
+
         if self.current_sequence is None:
             self._start_cycle(sequence)
             return
 
-        if sequence != self.current_sequence:
-            self.last_sequence = self.current_sequence
-            self._start_cycle(sequence)
+        if sequence == self.current_sequence:
+            return
+
+        previous_sequence = self.current_sequence
+        delta = (sequence - previous_sequence) & 0xFFFF
+
+        self.last_sequence = previous_sequence
+        self._start_cycle(sequence)
+
+        if delta < 0x8000:
+            if delta > 1:
+                _LOGGER.debug(
+                    "List %d sequence advanced from %d to %d "
+                    "(%d sequence values skipped)",
+                    self.list_id,
+                    previous_sequence,
+                    sequence,
+                    delta - 1,
+                )
+        else:
+            _LOGGER.info(
+                "List %d sequence moved backwards from %d to %d; "
+                "starting a new cycle after PLC restart",
+                self.list_id,
+                previous_sequence,
+                sequence,
+            )
 
     def _handle_unpacked_packet(
         self,
@@ -488,7 +518,6 @@ class NetVarCoordinator:
 
         self.received.add(variable_index)
         self.cycle_received.add(variable_index)
-        self.last_packet_indices = {variable_index}
         self.last_checksum = checksum
 
         # Publish immediately after every valid frame.
@@ -536,16 +565,14 @@ class NetVarCoordinator:
             )
             return
 
+        self._begin_or_continue_cycle(sequence)
+
         self.payload[:] = payload
 
         all_indices = set(range(len(self.variables)))
 
         self.received = set(all_indices)
         self.cycle_received = set(all_indices)
-        self.last_packet_indices = set(all_indices)
-
-        self.current_sequence = sequence
-        self.last_sequence = sequence
         self.last_checksum = checksum
 
         self.notify(all_indices)
