@@ -13,6 +13,28 @@ from .entity import NetVarEntity
 _LOGGER = logging.getLogger(__name__)
 
 
+def _to_bool(value):
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        if value == 0:
+            return False
+        if value == 1:
+            return True
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+
+        if normalized in ("true", "on", "1"):
+            return True
+
+        if normalized in ("false", "off", "0"):
+            return False
+
+    raise ValueError(f"Invalid BOOL value: {value}")
+
+
 def _get_yaml_entities(hass):
     entities = []
 
@@ -70,12 +92,12 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
         super().__init__(coordinator, variable)
 
         self._attr_device_class = variable.get("device_class")
-        self._attr_is_on = bool(
+        self._attr_is_on = _to_bool(
             variable.get("initial_value", False)
         )
 
     def _update_value(self, value):
-        self._attr_is_on = bool(value)
+        self._attr_is_on = _to_bool(value)
 
     async def async_turn_on(self, **kwargs):
         try:
@@ -83,7 +105,6 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
                 self.variable,
                 True,
             )
-
         except (ValueError, OSError) as err:
             _LOGGER.error(
                 "Cannot turn on %s: %s",
@@ -103,7 +124,6 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
                 self.variable,
                 False,
             )
-
         except (ValueError, OSError) as err:
             _LOGGER.error(
                 "Cannot turn off %s: %s",
