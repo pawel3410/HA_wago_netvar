@@ -4,7 +4,7 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.util import slugify
 
 from .const import DOMAIN, MODE_READ
-from .codec import decode_value, get_size
+from .codec import decode_value, variable_size
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class NetVarEntity(Entity):
 
     def _get_value(self, payload):
         offset = self.variable["offset"]
-        size = get_size(self.variable["type"])
+        size = variable_size(self.variable)
 
         if len(payload) < offset + size:
             return None
@@ -71,6 +71,7 @@ class NetVarEntity(Entity):
         return decode_value(
             payload[offset:offset + size],
             self.variable["type"],
+            self.variable.get("length"),
         )
 
     def _handle_update(self, payload, updated_indices):

@@ -141,7 +141,11 @@ class NetVarPacketStatusSensor(SensorEntity):
             "missing_indices": missing,
             "ever_received_count": len(coordinator.received),
             "packed": coordinator.pack_variables,
-            "checksum_field": f"0x{coordinator.last_checksum:04X}",
+            # Bytes 18-19 of the last frame, in wire order (e.g. "02 DB").
+            "checksum_field": (
+                f"{coordinator.last_checksum & 0xFF:02X} "
+                f"{coordinator.last_checksum >> 8:02X}"
+            ),
         }
 
     async def async_added_to_hass(self):

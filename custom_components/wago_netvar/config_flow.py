@@ -10,7 +10,7 @@ from .const import (
     DEFAULT_PORT,
     MODE_READ,
     MODE_WRITE,
-    TYPE_SIZES,
+    SUPPORTED_TYPES,
     READ_ENTITIES,
     WRITE_ENTITIES,
 )
@@ -76,10 +76,6 @@ class WagoNetVarConfigFlow(
                     default=True,
                 ): bool,
 
-                vol.Required(
-                    "transmit_checksum",
-                    default=False,
-                ): bool,
             }
         )
 
@@ -123,6 +119,7 @@ class WagoNetVarConfigFlow(
                 "min",
                 "max",
                 "step",
+                "length",
             ):
                 if key in user_input:
                     variable[key] = user_input[key]
@@ -134,6 +131,9 @@ class WagoNetVarConfigFlow(
 
             if variable["entity"] != "sensor":
                 variable.pop("zero_as_unavailable", None)
+
+            if variable["type"] != "STRING":
+                variable.pop("length", None)
 
             self._variables.append(variable)
 
@@ -154,7 +154,12 @@ class WagoNetVarConfigFlow(
                 ),
 
                 vol.Required("type"): vol.In(
-                    sorted(TYPE_SIZES.keys())
+                    list(SUPPORTED_TYPES)
+                ),
+
+                vol.Optional("length"): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=1, max=255),
                 ),
 
                 vol.Required("entity"): vol.In(

@@ -1,16 +1,62 @@
 import math
 import struct
 
-from .const import TYPE_SIZES
+from .const import (
+    DEFAULT_STRING_LENGTH,
+    INTEGER_TYPES,
+    MAX_STRING_LENGTH,
+    STRING_ENCODING,
+    STRING_TYPE,
+    TYPE_ALIASES,
+    TYPE_SIZES,
+)
 
 
-def get_size(var_type):
-    var_type = str(var_type).upper()
+def normalize_type(var_type):
+    var_type = str(var_type).strip().upper()
+
+    return TYPE_ALIASES.get(var_type, var_type)
+
+
+def string_length(length=None):
+    """Return the validated STRING length in characters."""
+    if length is None:
+        return DEFAULT_STRING_LENGTH
+
+    if isinstance(length, bool):
+        raise ValueError("STRING length must be an integer")
+
+    try:
+        number = int(length)
+
+        if float(length) != number:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("STRING length must be an integer") from None
+
+    if not 1 <= number <= MAX_STRING_LENGTH:
+        raise ValueError(
+            f"STRING length must be between 1 and {MAX_STRING_LENGTH}"
+        )
+
+    return number
+
+
+def get_size(var_type, length=None):
+    """Return the size in bytes. STRING(n) occupies n + 1 bytes."""
+    var_type = normalize_type(var_type)
+
+    if var_type == STRING_TYPE:
+        return string_length(length) + 1
 
     if var_type not in TYPE_SIZES:
         raise ValueError(f"Unsupported variable type: {var_type}")
 
     return TYPE_SIZES[var_type]
+
+
+def variable_size(variable):
+    return get_size(variable["type"], variable.get("length"))
 
 
 def _to_integer(value, var_type):
@@ -19,15 +65,24 @@ def _to_integer(value, var_type):
 
     try:
         number = int(value)
-    except (TypeError, ValueError, OverflowError):
-        raise ValueError(f"Invalid {var_type} value: {value}")
+    except (TypeError, ValueError, OverflowError) as err:
+        raise ValueError(f"Invalid {var_type} value: {value}") from err
 
     return number
 
 
-def decode_value(data, var_type):
-    var_type = str(var_type).upper()
-    size = get_size(var_type)
+def _integer_range(size, signed):
+    bits = size * 8
+
+    if signed:
+        return -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+
+    return 0, (1 << bits) - 1
+
+
+def decode_value(data, var_type, length=None):
+    var_type = normalize_type(var_type)
+    size = get_size(var_type, length)
 
     if len(data) != size:
         raise ValueError(
@@ -38,20 +93,10 @@ def decode_value(data, var_type):
     if var_type == "BOOL":
         return data[0] != 0
 
-    if var_type == "BYTE":
-        return data[0]
+    if var_type in INTEGER_TYPES:
+        _size, signed = INTEGER_TYPES[var_type]
 
-    if var_type == "INT":
-        return int.from_bytes(data, "little", signed=True)
-
-    if var_type == "UINT":
-        return int.from_bytes(data, "little", signed=False)
-
-    if var_type == "DINT":
-        return int.from_bytes(data, "little", signed=True)
-
-    if var_type in ("UDINT", "DWORD"):
-        return int.from_bytes(data, "little", signed=False)
+        return int.from_bytes(data, "little", signed=signed)
 
     if var_type == "REAL":
         value = struct.unpack("<f", data)[0]
@@ -61,12 +106,19 @@ def decode_value(data, var_type):
 
         return value
 
+    if var_type == STRING_TYPE:
+        # The text ends at the first NUL byte. Bytes after it are not
+        # cleared by the PLC and may contain stale memory.
+        text = bytes(data).split(b"\x00", 1)[0]
+
+        return text.decode(STRING_ENCODING, errors="replace")
+
     raise ValueError(f"Unsupported variable type: {var_type}")
 
 
-def encode_value(value, var_type):
-    var_type = str(var_type).upper()
-    size = get_size(var_type)
+def encode_value(value, var_type, length=None):
+    var_type = normalize_type(var_type)
+    size = get_size(var_type, length)
 
     if var_type == "BOOL":
         if isinstance(value, str):
@@ -88,58 +140,55 @@ def encode_value(value, var_type):
 
         raise ValueError("BOOL value must be true, false, 0 or 1")
 
-    if var_type == "BYTE":
+    if var_type in INTEGER_TYPES:
+        _size, signed = INTEGER_TYPES[var_type]
         number = _to_integer(value, var_type)
+        minimum, maximum = _integer_range(size, signed)
 
-        if not 0 <= number <= 255:
-            raise ValueError("BYTE value must be between 0 and 255")
+        if not minimum <= number <= maximum:
+            raise ValueError(
+                f"{var_type} value out of range "
+                f"({minimum}..{maximum})"
+            )
 
-        return number.to_bytes(size, "little", signed=False)
-
-    if var_type == "INT":
-        number = _to_integer(value, var_type)
-
-        if not -32768 <= number <= 32767:
-            raise ValueError("INT value out of range")
-
-        return number.to_bytes(size, "little", signed=True)
-
-    if var_type == "UINT":
-        number = _to_integer(value, var_type)
-
-        if not 0 <= number <= 65535:
-            raise ValueError("UINT value out of range")
-
-        return number.to_bytes(size, "little", signed=False)
-
-    if var_type == "DINT":
-        number = _to_integer(value, var_type)
-
-        if not -2147483648 <= number <= 2147483647:
-            raise ValueError("DINT value out of range")
-
-        return number.to_bytes(size, "little", signed=True)
-
-    if var_type in ("UDINT", "DWORD"):
-        number = _to_integer(value, var_type)
-
-        if not 0 <= number <= 4294967295:
-            raise ValueError(f"{var_type} value out of range")
-
-        return number.to_bytes(size, "little", signed=False)
+        return number.to_bytes(size, "little", signed=signed)
 
     if var_type == "REAL":
         try:
             number = float(value)
-        except (TypeError, ValueError, OverflowError):
-            raise ValueError(f"Invalid REAL value: {value}")
+        except (TypeError, ValueError, OverflowError) as err:
+            raise ValueError(f"Invalid REAL value: {value}") from err
 
         if not math.isfinite(number):
             raise ValueError("REAL value must be finite")
 
         try:
             return struct.pack("<f", number)
-        except (OverflowError, struct.error):
-            raise ValueError("REAL value is outside the supported range")
+        except (OverflowError, struct.error) as err:
+            raise ValueError(
+                "REAL value is outside the supported range"
+            ) from err
+
+    if var_type == STRING_TYPE:
+        if not isinstance(value, str):
+            raise ValueError("STRING value must be text")
+
+        try:
+            encoded = value.encode(STRING_ENCODING)
+        except UnicodeEncodeError as err:
+            raise ValueError(
+                f"STRING contains characters not supported by "
+                f"{STRING_ENCODING}"
+            ) from err
+
+        if b"\x00" in encoded:
+            raise ValueError("STRING cannot contain NUL characters")
+
+        if len(encoded) > size - 1:
+            raise ValueError(
+                f"STRING is longer than {size - 1} characters"
+            )
+
+        return encoded.ljust(size, b"\x00")
 
     raise ValueError(f"Unsupported variable type: {var_type}")

@@ -17,11 +17,16 @@ from .const import (
     HEADER_SIZE,
     MODE_READ,
     MODE_WRITE,
-    TYPE_SIZES,
+    SUPPORTED_TYPES,
     READ_ENTITIES,
     WRITE_ENTITIES,
 )
-from .codec import get_size, encode_value
+from .codec import (
+    encode_value,
+    normalize_type,
+    string_length,
+    variable_size,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,10 +61,10 @@ def validate_variable(variable):
         raise vol.Invalid("Variable offset cannot be negative")
 
     result["offset"] = offset
-    result["type"] = str(result["type"]).upper()
+    result["type"] = normalize_type(result["type"])
     result["entity"] = str(result["entity"])
 
-    if result["type"] not in TYPE_SIZES:
+    if result["type"] not in SUPPORTED_TYPES:
         raise vol.Invalid(
             f"Unsupported variable type: {result['type']}"
         )
@@ -79,10 +84,25 @@ def validate_variable(variable):
             "Only BOOL can use binary_sensor or switch"
         )
 
-    result.setdefault(
-        "initial_value",
-        False if result["type"] == "BOOL" else 0,
-    )
+    if result["type"] == "STRING":
+        if result["entity"] != "sensor":
+            raise vol.Invalid("STRING can only use sensor")
+
+        try:
+            result["length"] = string_length(result.get("length"))
+        except ValueError as err:
+            raise vol.Invalid(str(err)) from err
+    else:
+        result.pop("length", None)
+
+    if result["type"] == "BOOL":
+        default_initial_value = False
+    elif result["type"] == "STRING":
+        default_initial_value = ""
+    else:
+        default_initial_value = 0
+
+    result.setdefault("initial_value", default_initial_value)
     result.setdefault("enabled_by_default", True)
     result.setdefault("force_update", False)
 
@@ -140,7 +160,9 @@ def validate_device(device):
     result.setdefault("port", DEFAULT_PORT)
     result.setdefault("mode", MODE_READ)
     result.setdefault("pack_variables", True)
-    result.setdefault("transmit_checksum", False)
+
+    # transmit_checksum was removed: the checksum algorithm is unknown.
+    legacy_transmit_checksum = result.pop("transmit_checksum", False)
 
     try:
         result["port"] = int(result["port"])
@@ -160,8 +182,11 @@ def validate_device(device):
     if not isinstance(result["pack_variables"], bool):
         raise vol.Invalid("pack_variables must be boolean")
 
-    if not isinstance(result["transmit_checksum"], bool):
-        raise vol.Invalid("transmit_checksum must be boolean")
+    if legacy_transmit_checksum is True and result["mode"] == MODE_WRITE:
+        raise vol.Invalid(
+            "transmit_checksum is no longer supported. Remove it and "
+            "disable checksum checking on the PLC receive list"
+        )
 
     variables = result.get("variables")
 
@@ -188,7 +213,7 @@ def validate_device(device):
 
     for variable in result["variables"]:
         start = variable["offset"]
-        end = start + get_size(variable["type"])
+        end = start + variable_size(variable)
 
         for other_start, other_end in ranges:
             if start < other_end and other_start < end:
@@ -199,7 +224,7 @@ def validate_device(device):
         ranges.append((start, end))
 
     result["buffer_size"] = max(
-        variable["offset"] + get_size(variable["type"])
+        variable["offset"] + variable_size(variable)
         for variable in result["variables"]
     )
 
@@ -327,14 +352,15 @@ class NetVarPortHub:
 
         _LOGGER.debug(
             "RX %s:%d list=%d index=%d count=%d "
-            "cycle=%d checksum=0x%04X payload=%s",
+            "cycle=%d header_bytes_18_19=%02X %02X payload=%s",
             addr[0],
             self.port,
             list_id,
             variable_index,
             variable_count,
             sequence,
-            checksum,
+            checksum & 0xFF,
+            checksum >> 8,
             payload.hex(),
         )
 
@@ -359,7 +385,6 @@ class NetVarCoordinator:
         self.mode = config["mode"]
 
         self.pack_variables = config["pack_variables"]
-        self.transmit_checksum = config["transmit_checksum"]
 
         self.variables = config["variables"]
         self.buffer_size = config["buffer_size"]
@@ -384,6 +409,7 @@ class NetVarCoordinator:
                 encoded = encode_value(
                     variable["initial_value"],
                     variable["type"],
+                    variable.get("length"),
                 )
 
                 offset = variable["offset"]
@@ -499,7 +525,7 @@ class NetVarCoordinator:
             return
 
         variable = self.variables[variable_index]
-        size = get_size(variable["type"])
+        size = variable_size(variable)
 
         if len(payload) != size:
             _LOGGER.warning(
@@ -609,7 +635,11 @@ class NetVarCoordinator:
         if self.mode != MODE_WRITE:
             raise ValueError("Cannot write to a read-only list")
 
-        encoded = encode_value(value, variable["type"])
+        encoded = encode_value(
+            value,
+            variable["type"],
+            variable.get("length"),
+        )
         offset = variable["offset"]
 
         old_value = bytes(
@@ -622,7 +652,7 @@ class NetVarCoordinator:
             self.payload[offset:offset + len(encoded)] = old_value
             raise ValueError(
                 "NetVar packet was not sent. "
-                "Check checksum configuration and UDP transport."
+                "Check the UDP transport."
             )
 
         self.notify()
@@ -641,7 +671,9 @@ class NetVarCoordinator:
 
         header[16:18] = self.tx_sequence.to_bytes(2, "little")
 
-        # Checksum generation is not implemented.
+        # Flags and checksum (bytes 18-19) are always 00 00: the checksum
+        # algorithm is unknown, so it is not generated. The PLC receive
+        # list must have checksum checking disabled.
         header[18:20] = b"\x00\x00"
 
         self.tx_sequence = (self.tx_sequence + 1) & 0xFFFF
@@ -650,14 +682,6 @@ class NetVarCoordinator:
 
     def send_variable(self, variable):
         if self.mode != MODE_WRITE:
-            return False
-
-        if self.transmit_checksum:
-            _LOGGER.error(
-                "Cannot send list %d with transmit_checksum enabled: "
-                "checksum algorithm is not verified",
-                self.list_id,
-            )
             return False
 
         if self.pack_variables:
@@ -669,7 +693,7 @@ class NetVarCoordinator:
         else:
             index = self.variables.index(variable)
             offset = variable["offset"]
-            size = get_size(variable["type"])
+            size = variable_size(variable)
 
             value = bytes(
                 self.payload[offset:offset + size]
@@ -795,7 +819,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     coordinator = await _async_create_coordinator(
         hass,
-        entry.data,
+        dict(entry.data),
     )
 
     hass.data[DOMAIN]["devices"][entry.entry_id] = {
