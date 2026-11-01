@@ -1,0 +1,36 @@
+Założenia projektowe dla homeassistant i esphome:
+- obsługiwane dane sa little endian
+- listy write i read, lista może być tylko read albo write, mogą być listy zarówno read jak i write
+- sequence_counter (bajt 16-17) jest odczytywany lecz nie uwzględniany
+- checksum (bajt 18-19) jest odczytywana lecz nie uwzględniana, przy wysyłce =0,
+- walidacja listy read po IP nadawcy (jezeli różny od 0.0.0.0), port docelowy (mozliwe listy z roznymii portami), list_ID (bajt 8-9), rozmiar całej ramki frame_size (bajt 14-15), var_count (bajty 12–13) z zadeklarowanym var_count w konfiguracji listy,
+- automatycznie utworzone sensory liczby ramek które nie przeszły walidacji do kazdej listy (rejected_packets) oraz rx_packets, tx_packets, rx_errors, tx_errors,
+- kazda ramka która przejdzie walidacje jest dekodowana,
+- offset zmiennych dekodowanych przy odczycie podawany recznie a nie automatycznie (mozna wtedy pominac odczyt niektórych zmiennych)
+- wysyłana zmienna jest konwertowana na odpowiedni typ danych którą jest wysyłana (przy przepełnieniu mniej znaczace bity sa ucinane, przy STRING liczby zamieniane na text),
+- wysyłanie listy na adres IP (możliwy broadcast 255.255.255.255), port, zadeklarowany list_ID,
+- wysyłanie listy przy zmianie on_change (domyslnie no, min_interval domyslnie 500ms), oraz cyklicznie update_interval (domyslnie 5s, dla 0s brak wysyłania) działajacy rownolegle z on_change,
+- dokumentacja README.md musi zawierac typy obsługiwanych danych, szczegółową budowe ramki NetVar i pozostałe szczegółowe informacje oraz przykłady
+- projekt ma sie składać z niezbędnej liczby plików, wersja dla esphome ma się uruchamiać na arduino a także na esp-idf i implementowac dump_config()
+
+
+
+Typy obsługiwanych danych:
+Typ danych	Wielkość w pamięci	Zakres wartości / Opis
+BOOL	1 bajt (8 bitów)	TRUE (1) lub FALSE (0)
+BYTE	1 bajt (8 bitów)	0 do 255 (maska bitowa)
+WORD	2 bajty (16 bitów)	0 do 65 535 (maska bitowa)
+DWORD	4 bajty (32 bity)	0 do 4 294 967 295 (maska bitowa)
+SINT	1 bajt (8 bitów)	-128 do 127
+USINT	1 bajt (8 bitów)	0 do 255
+INT	2 bajty (16 bitów)	-32 768 do 32 767
+UINT	2 bajty (16 bitów)	0 do 65 535
+DINT	4 bajty (32 bity)	-2 147 483 648 do 2 147 483 647
+UDINT	4 bajty (32 bity)	0 do 4 294 967 295
+REAL	4 bajty (32 bity)	1.175494351e-38 do 3.402823466e+38 (zmiennoprzecinkowe)
+LREAL	8 bajtów (64 bity)	2.2250738585072014e-308 do 1.7976931348623158e+308 (nie jest obsługiwana przez NetVars !!!)
+TIME	4 bajty (32 bity)	T#0ms do T#49d17h2m47s295ms (rozdzielczość 1ms)
+DATE	4 bajty (32 bity)	D#1970-01-01 do D#2106-02-07 (rozdzielczość 1s)
+TIME_OF_DAY (TOD)	4 bajty (32 bity)	TOD#00:00:00 do TOD#23:59:59 (rozdzielczość 1ms)
+DATE_AND_TIME (DT)	4 bajty (32 bity)	DT#1970-01-01-00:00:00 do DT#2106-02-07-06:28:15 (rozdzielczość 1s)
+STRING	Liczba znaków + 1 bajt zakończenia(16#00)	Domyślnie 80 znaków wyłącznie ASCII (rozmiar można zmienić, np. STRING(255), max 255) ostatni bajt=16#00
