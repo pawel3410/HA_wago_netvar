@@ -16,7 +16,7 @@ Założenia projektowe dla homeassistant i esphome:
 - komentarze w kodzie w jezyku polskim, parametry konfiguracyjne po angielsku, README.md po polsku,
 - projekt ma sie składać z niezbędnej liczby plików, jezeli się da, to ogranicz ich liczbę,
 - wersja dla esphome ma się uruchamiać na arduino a także na esp-idf i implementowac dump_config(),
-- wersja dla Homeassistant ma być konfigurowana zarówno przez UI jak i tekstowo
+- wersja dla Homeassistant ma być konfigurowana recznie tekstowo,
 
 
 
