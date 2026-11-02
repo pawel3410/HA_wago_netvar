@@ -19,12 +19,12 @@ def normalize_type(var_type):
 
 
 def string_length(length=None):
-    """Return the validated STRING length in characters."""
+    """Zwraca zweryfikowaną długość STRING w znakach."""
     if length is None:
         return DEFAULT_STRING_LENGTH
 
     if isinstance(length, bool):
-        raise ValueError("STRING length must be an integer")
+        raise ValueError("Długość STRING musi być liczbą całkowitą")
 
     try:
         number = int(length)
@@ -32,25 +32,25 @@ def string_length(length=None):
         if float(length) != number:
             raise ValueError
     except (TypeError, ValueError, OverflowError):
-        raise ValueError("STRING length must be an integer") from None
+        raise ValueError("Długość STRING musi być liczbą całkowitą") from None
 
     if not 1 <= number <= MAX_STRING_LENGTH:
         raise ValueError(
-            f"STRING length must be between 1 and {MAX_STRING_LENGTH}"
+            f"Długość STRING musi być z przedziału 1 do {MAX_STRING_LENGTH}"
         )
 
     return number
 
 
 def get_size(var_type, length=None):
-    """Return the size in bytes. STRING(n) occupies n + 1 bytes."""
+    """Zwraca rozmiar w bajtach. STRING(n) zajmuje n + 1 bajtów."""
     var_type = normalize_type(var_type)
 
     if var_type == STRING_TYPE:
         return string_length(length) + 1
 
     if var_type not in TYPE_SIZES:
-        raise ValueError(f"Unsupported variable type: {var_type}")
+        raise ValueError(f"Nieobsługiwany typ zmiennej: {var_type}")
 
     return TYPE_SIZES[var_type]
 
@@ -61,12 +61,12 @@ def variable_size(variable):
 
 def _to_integer(value, var_type):
     if isinstance(value, bool):
-        raise ValueError(f"{var_type} value must be numeric")
+        raise ValueError(f"{var_type} wartość musi być numeryczna")
 
     try:
         number = int(value)
     except (TypeError, ValueError, OverflowError) as err:
-        raise ValueError(f"Invalid {var_type} value: {value}") from err
+        raise ValueError(f"Nieprawidłowa wartość {var_type}: {value}") from err
 
     return number
 
@@ -81,7 +81,7 @@ def _integer_range(size, signed):
 
 
 def _truncate_integer(number, size, signed):
-    """Truncate integer to fit in size bytes, keeping least significant bits."""
+    """Obcina liczbę całkowitą do rozmiaru w bajtach, zachowując najmłodsze bity."""
     bits = size * 8
     mask = (1 << bits) - 1
     truncated = number & mask
@@ -98,8 +98,8 @@ def decode_value(data, var_type, length=None):
 
     if len(data) != size:
         raise ValueError(
-            f"Invalid data size for {var_type}: "
-            f"expected {size}, received {len(data)}"
+            f"Nieprawidłowy rozmiar danych dla {var_type}: "
+            f"oczekiwano {size}, otrzymano {len(data)}"
         )
 
     if var_type == "BOOL":
@@ -114,18 +114,18 @@ def decode_value(data, var_type, length=None):
         value = struct.unpack("<f", data)[0]
 
         if not math.isfinite(value):
-            raise ValueError("Received REAL value is not finite")
+            raise ValueError("Otrzymana wartość REAL nie jest skończona")
 
         return value
 
     if var_type == STRING_TYPE:
-        # The text ends at the first NUL byte. Bytes after it are not
-        # cleared by the PLC and may contain stale memory.
+        # Tekst kończy się przy pierwszym bajcie NUL. Bajty po nim nie są
+        # czyszczone przez PLC i mogą zawierać nieaktualne dane z pamięci.
         text = bytes(data).split(b"\x00", 1)[0]
 
         return text.decode(STRING_ENCODING, errors="replace")
 
-    raise ValueError(f"Unsupported variable type: {var_type}")
+    raise ValueError(f"Nieobsługiwany typ zmiennej: {var_type}")
 
 
 def encode_value(value, var_type, length=None):
@@ -142,7 +142,7 @@ def encode_value(value, var_type, length=None):
             if normalized in ("false", "off", "0"):
                 return b"\x00"
 
-            raise ValueError(f"Invalid BOOL value: {value}")
+            raise ValueError(f"Nieprawidłowa wartość BOOL: {value}")
 
         if isinstance(value, bool):
             return b"\x01" if value else b"\x00"
@@ -150,7 +150,7 @@ def encode_value(value, var_type, length=None):
         if value in (0, 1):
             return b"\x01" if value == 1 else b"\x00"
 
-        raise ValueError("BOOL value must be true, false, 0 or 1")
+        raise ValueError("Wartość BOOL musi być true, false, 0 lub 1")
 
     if var_type in INTEGER_TYPES:
         _size, signed = INTEGER_TYPES[var_type]
@@ -163,16 +163,16 @@ def encode_value(value, var_type, length=None):
         try:
             number = float(value)
         except (TypeError, ValueError, OverflowError) as err:
-            raise ValueError(f"Invalid REAL value: {value}") from err
+            raise ValueError(f"Nieprawidłowa wartość REAL: {value}") from err
 
         if not math.isfinite(number):
-            raise ValueError("REAL value must be finite")
+            raise ValueError("Wartość REAL musi być skończona")
 
         try:
             return struct.pack("<f", number)
         except (OverflowError, struct.error) as err:
             raise ValueError(
-                "REAL value is outside the supported range"
+                "Wartość REAL jest poza obsługiwanym zakresem"
             ) from err
 
     if var_type == STRING_TYPE:
@@ -183,18 +183,17 @@ def encode_value(value, var_type, length=None):
             encoded = value.encode(STRING_ENCODING)
         except UnicodeEncodeError as err:
             raise ValueError(
-                f"STRING contains characters not supported by "
-                f"{STRING_ENCODING}"
+                f"STRING zawiera znaki nieobsługiwane przez {STRING_ENCODING}"
             ) from err
 
         if b"\x00" in encoded:
-            raise ValueError("STRING cannot contain NUL characters")
+            raise ValueError("STRING nie może zawierać znaków NUL")
 
         if len(encoded) > size - 1:
             raise ValueError(
-                f"STRING is longer than {size - 1} characters"
+                f"STRING jest dłuższy niż {size - 1} znaków"
             )
 
         return encoded.ljust(size, b"\x00")
 
-    raise ValueError(f"Unsupported variable type: {var_type}")
+    raise ValueError(f"Nieobsługiwany typ zmiennej: {var_type}")
