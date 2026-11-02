@@ -1,16 +1,18 @@
 Założenia projektowe dla homeassistant i esphome:
 - obsługiwane dane sa little endian
-- listy write i read, lista może być tylko read albo write, mogą być listy zarówno read jak i write
+- listy write i read, dana lista może być tylko read albo write, może być wiele list zarówno read jak i write z różnymi IP_address, list_ID i port,
+- listy write i read moga kozystać z tego samego numeru portu,
 - sequence_counter (bajt 16-17) jest odczytywany lecz nie uwzględniany
 - checksum (bajt 18-19) jest odczytywana lecz nie uwzględniana, przy wysyłce =0,
 - walidacja listy read po IP nadawcy (jezeli różny od 0.0.0.0), port docelowy (mozliwe listy z roznymii portami), list_ID (bajt 8-9), rozmiar całej ramki frame_size (bajt 14-15), var_count (bajty 12–13) z zadeklarowanym var_count w konfiguracji listy,
 - automatycznie utworzone sensory liczby ramek które nie przeszły walidacji do kazdej listy (rejected_packets) oraz rx_packets, tx_packets, rx_errors, tx_errors,
 - kazda ramka która przejdzie walidacje jest dekodowana,
-- offset zmiennych dekodowanych przy odczycie podawany recznie a nie automatycznie (mozna wtedy pominac odczyt niektórych zmiennych)
+- offset zmiennych dekodowanych przy odczycie podawany recznie a nie automatycznie (mozna wtedy pominac odczyt niektórych zmiennych),
+- offset zmiennych wysyłanych podawany recznie a nie automatycznie,
 - wysyłana zmienna jest konwertowana na odpowiedni typ danych którą jest wysyłana (przy przepełnieniu mniej znaczace bity sa ucinane, przy STRING liczby zamieniane na text),
-- wysyłanie listy na adres IP (możliwy broadcast 255.255.255.255), port, zadeklarowany list_ID,
-- wysyłanie listy przy zmianie on_change (domyslnie no, min_interval domyslnie 500ms), oraz cyklicznie update_interval (domyslnie 5s, dla 0s brak wysyłania) działajacy rownolegle z on_change,
-- dokumentacja README.md musi zawierac typy obsługiwanych danych, odpowiadajace im typy w homeassistant i esphome, szczegółową budowe ramki NetVar, opisane wszystkie opcje konfiguracyjne i pozostałe szczegółowe informacje oraz przykłady
+- wysyłanie listy na IP_address (możliwy broadcast 255.255.255.255), port, zadeklarowany list_ID,
+- wysyłanie listy przy zmianie on_change (domyslnie no, min_interval domyslnie 500ms), oraz cyklicznie update_interval (domyslnie 5s, dla 0s brak wysyłania przez update_interval jezeli aktywowany) działajacy rownolegle z on_change,
+- dokumentacja README.md musi zawierac typy obsługiwanych danych, odpowiadajace im typy w homeassistant i esphome, szczegółową budowe ramki NetVar, opisane wszystkie opcje konfiguracyjne i pozostałe szczegółowe informacje oraz przykłady. Komentarze w kodzie w jezyku polskim,
 - projekt ma sie składać z niezbędnej liczby plików, jezeli się da, to ogranicz ich liczbę, wersja dla esphome ma się uruchamiać na arduino a także na esp-idf i implementowac dump_config()
 
 
