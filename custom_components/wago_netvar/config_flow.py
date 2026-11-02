@@ -1,4 +1,3 @@
-
 import ipaddress
 
 import voluptuous as vol
@@ -21,6 +20,7 @@ from . import validate_device
 
 
 def _validate_ip_address(value):
+    """Walidacja adresu IP podanego przez użytkownika."""
     value = str(value).strip()
 
     try:
@@ -35,7 +35,7 @@ class WagoNetVarConfigFlow(
     config_entries.ConfigFlow,
     domain=DOMAIN,
 ):
-    """Konfiguracja przepływu dla Wago NetVar."""
+    """Przepływ konfiguracji dla integracji Wago NetVar."""
 
     VERSION = 1
 
@@ -44,6 +44,7 @@ class WagoNetVarConfigFlow(
         self._variables = []
 
     async def async_step_user(self, user_input=None):
+        """Pierwszy krok: podstawowe parametry listy NetVar."""
         errors = {}
 
         if user_input is not None:
@@ -110,6 +111,7 @@ class WagoNetVarConfigFlow(
         )
 
     async def async_step_variables(self, user_input=None):
+        """Menu wyboru: dodaj zmienną lub zakończ konfigurację."""
         return self.async_show_menu(
             step_id="variables",
             menu_options=[
@@ -119,6 +121,7 @@ class WagoNetVarConfigFlow(
         )
 
     async def async_step_add_variable(self, user_input=None):
+        """Krok dodawania pojedynczej zmiennej do listy."""
         errors = {}
 
         if user_input is not None:
@@ -228,6 +231,7 @@ class WagoNetVarConfigFlow(
         )
 
     async def async_step_finish(self, user_input=None):
+        """Ostatni krok: walidacja i utworzenie wpisu konfiguracyjnego."""
         errors = {}
 
         if user_input is not None:
