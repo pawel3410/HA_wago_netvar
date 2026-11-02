@@ -80,6 +80,18 @@ def _integer_range(size, signed):
     return 0, (1 << bits) - 1
 
 
+def _truncate_integer(number, size, signed):
+    """Truncate integer to fit in size bytes, keeping least significant bits."""
+    bits = size * 8
+    mask = (1 << bits) - 1
+    truncated = number & mask
+
+    if signed and truncated >= (1 << (bits - 1)):
+        truncated -= 1 << bits
+
+    return truncated
+
+
 def decode_value(data, var_type, length=None):
     var_type = normalize_type(var_type)
     size = get_size(var_type, length)
@@ -143,15 +155,9 @@ def encode_value(value, var_type, length=None):
     if var_type in INTEGER_TYPES:
         _size, signed = INTEGER_TYPES[var_type]
         number = _to_integer(value, var_type)
-        minimum, maximum = _integer_range(size, signed)
+        truncated = _truncate_integer(number, size, signed)
 
-        if not minimum <= number <= maximum:
-            raise ValueError(
-                f"{var_type} value out of range "
-                f"({minimum}..{maximum})"
-            )
-
-        return number.to_bytes(size, "little", signed=signed)
+        return truncated.to_bytes(size, "little", signed=signed)
 
     if var_type == "REAL":
         try:
@@ -171,7 +177,7 @@ def encode_value(value, var_type, length=None):
 
     if var_type == STRING_TYPE:
         if not isinstance(value, str):
-            raise ValueError("STRING value must be text")
+            value = str(value)
 
         try:
             encoded = value.encode(STRING_ENCODING)
