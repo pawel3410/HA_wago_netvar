@@ -8,6 +8,7 @@ from .entity import NetVarEntity
 
 
 def _get_yaml_entities(hass):
+    """Tworzenie encji z konfiguracji YAML."""
     entities = []
     devices = hass.data.get(DOMAIN, {}).get("devices", {})
 
@@ -43,6 +44,7 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info=None,
 ):
+    """Konfiguracja platformy sensor z YAML."""
     async_add_entities(_get_yaml_entities(hass))
 
 
@@ -51,6 +53,7 @@ async def async_setup_entry(
     entry,
     async_add_entities: AddEntitiesCallback,
 ):
+    """Konfiguracja platformy sensor z wpisu konfiguracyjnego."""
     device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
         entry.entry_id
     )
@@ -81,6 +84,8 @@ async def async_setup_entry(
 
 
 class NetVarSensor(NetVarEntity, SensorEntity):
+    """Czujnik NetVar."""
+
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
@@ -103,6 +108,7 @@ class NetVarSensor(NetVarEntity, SensorEntity):
         self._attr_native_value = None
 
     def _update_value(self, value):
+        """Aktualizacja wartości czujnika."""
         if self._zero_as_unavailable and value == 0:
             self._attr_native_value = None
         else:
@@ -110,6 +116,8 @@ class NetVarSensor(NetVarEntity, SensorEntity):
 
 
 class NetVarDiagnosticSensor(SensorEntity):
+    """Czujnik diagnostyczny listy NetVar."""
+
     def __init__(self, coordinator, sensor_type):
         self.coordinator = coordinator
         self._sensor_type = sensor_type
