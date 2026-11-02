@@ -113,7 +113,13 @@ class NetVarNumber(NetVarEntity, NumberEntity):
         if not math.isfinite(number):
             return
 
-        self._attr_native_value = number
+        self._attr_native_value = min(
+            max(
+                number,
+                self._attr_native_min_value,
+            ),
+            self._attr_native_max_value,
+        )
 
     async def async_set_native_value(self, value):
         try:
@@ -121,22 +127,22 @@ class NetVarNumber(NetVarEntity, NumberEntity):
 
         except (TypeError, ValueError, OverflowError) as err:
             raise HomeAssistantError(
-                "Invalid numeric value"
+                "Nieprawidłowa wartość numeryczna"
             ) from err
 
         if not math.isfinite(number):
             raise HomeAssistantError(
-                "Numeric value must be finite"
+                "Wartość numeryczna musi być skończona"
             )
 
         if number < self._attr_native_min_value:
             raise HomeAssistantError(
-                "Value is below minimum"
+                "Wartość jest poniżej minimum"
             )
 
         if number > self._attr_native_max_value:
             raise HomeAssistantError(
-                "Value is above maximum"
+                "Wartość jest powyżej maksimum"
             )
 
         try:
@@ -147,14 +153,14 @@ class NetVarNumber(NetVarEntity, NumberEntity):
 
         except (ValueError, OSError) as err:
             _LOGGER.error(
-                "Cannot set %s to %s: %s",
+                "Nie można ustawić %s na %s: %s",
                 self.variable["name"],
                 number,
                 err,
             )
 
             raise HomeAssistantError(
-                f"Cannot send value to PLC: {err}"
+                f"Nie można wysłać wartości do PLC: {err}"
             ) from err
 
         self._attr_native_value = number
