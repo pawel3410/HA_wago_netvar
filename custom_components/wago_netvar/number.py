@@ -1,4 +1,3 @@
-
 import logging
 import math
 
@@ -15,6 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _get_yaml_entities(hass):
+    """Tworzenie encji number z konfiguracji YAML."""
     entities = []
 
     devices = hass.data.get(DOMAIN, {}).get("devices", {})
@@ -40,6 +40,7 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info=None,
 ):
+    """Konfiguracja platformy number z YAML."""
     async_add_entities(_get_yaml_entities(hass))
 
 
@@ -48,6 +49,7 @@ async def async_setup_entry(
     entry,
     async_add_entities: AddEntitiesCallback,
 ):
+    """Konfiguracja platformy number z wpisu konfiguracyjnego."""
     device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
         entry.entry_id
     )
@@ -67,6 +69,8 @@ async def async_setup_entry(
 
 
 class NetVarNumber(NetVarEntity, NumberEntity):
+    """Encja number dla zmiennych NetVar."""
+
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
