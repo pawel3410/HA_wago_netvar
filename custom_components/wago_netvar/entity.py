@@ -1,4 +1,3 @@
-
 import logging
 
 from homeassistant.helpers.entity import Entity
@@ -11,6 +10,8 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class NetVarEntity(Entity):
+    """Bazowa encja dla zmiennych NetVar."""
+
     def __init__(self, coordinator, variable):
         self.coordinator = coordinator
         self.variable = variable
@@ -55,23 +56,27 @@ class NetVarEntity(Entity):
 
     @property
     def available(self):
+        """Dostępność encji: dla trybu write zawsze dostępna, dla read po pierwszym odebraniu."""
         if self.coordinator.mode != MODE_READ:
             return True
 
         return self._variable_index in self.coordinator.received
 
     async def async_added_to_hass(self):
+        """Rejestracja słuchacza aktualizacji po dodaniu encji (tylko tryb read)."""
         if self.coordinator.mode == MODE_READ:
             self.coordinator.register_listener(
                 self._handle_update
             )
 
     async def async_will_remove_from_hass(self):
+        """Wyrejestrowanie słuchacza przed usunięciem encji."""
         self.coordinator.unregister_listener(
             self._handle_update
         )
 
     def _get_value(self, payload):
+        """Wyodrębnienie wartości zmiennej z ładunku UDP."""
         offset = self.variable["offset"]
         size = variable_size(self.variable)
 
@@ -85,6 +90,7 @@ class NetVarEntity(Entity):
         )
 
     def _handle_update(self, payload, updated_indices):
+        """Obsługa aktualizacji danych z koordynatora."""
         if self.coordinator.mode != MODE_READ:
             return
 
@@ -107,4 +113,5 @@ class NetVarEntity(Entity):
         self.schedule_update_ha_state()
 
     def _update_value(self, value):
+        """Aktualizacja stanu encji (do zaimplementowania w podklasach)."""
         raise NotImplementedError
