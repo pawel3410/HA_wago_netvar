@@ -52,5 +52,3 @@ TYPE_ALIASES = {
 
 READ_ENTITIES = ("sensor", "binary_sensor")
 WRITE_ENTITIES = ("switch", "number")
-
-ALL_ENTITIES = READ_ENTITIES + WRITE_ENTITIES
