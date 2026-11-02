@@ -1,4 +1,3 @@
-
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -8,6 +7,7 @@ from .entity import NetVarEntity
 
 
 def _get_yaml_entities(hass):
+    """Tworzenie encji binary_sensor z konfiguracji YAML."""
     entities = []
 
     devices = hass.data.get(DOMAIN, {}).get("devices", {})
@@ -33,6 +33,7 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info=None,
 ):
+    """Konfiguracja platformy binary_sensor z YAML."""
     async_add_entities(_get_yaml_entities(hass))
 
 
@@ -41,6 +42,7 @@ async def async_setup_entry(
     entry,
     async_add_entities: AddEntitiesCallback,
 ):
+    """Konfiguracja platformy binary_sensor z wpisu konfiguracyjnego."""
     device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
         entry.entry_id
     )
@@ -60,6 +62,8 @@ async def async_setup_entry(
 
 
 class NetVarBinarySensor(NetVarEntity, BinarySensorEntity):
+    """Czujnik binarny NetVar."""
+
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
