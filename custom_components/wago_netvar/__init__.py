@@ -37,33 +37,33 @@ _LOGGER = logging.getLogger(__name__)
 
 def validate_variable(variable):
     if not isinstance(variable, dict):
-        raise vol.Invalid("Variable definition must be a dictionary")
+        raise vol.Invalid("Definicja zmiennej musi być słownikiem")
 
     required = ("name", "offset", "type", "entity")
 
     for key in required:
         if key not in variable:
-            raise vol.Invalid(f"Missing variable field: {key}")
+            raise vol.Invalid(f"Brakujące pole zmiennej: {key}")
 
     result = dict(variable)
     result["name"] = str(result["name"]).strip()
 
     if not result["name"]:
-        raise vol.Invalid("Variable name cannot be empty")
+        raise vol.Invalid("Nazwa zmiennej nie może być pusta")
 
     if isinstance(result["offset"], bool):
-        raise vol.Invalid("Variable offset must be an integer")
+        raise vol.Invalid("Offset zmiennej musi być liczbą całkowitą")
 
     try:
         offset = int(result["offset"])
     except (TypeError, ValueError, OverflowError):
-        raise vol.Invalid("Variable offset must be an integer")
+        raise vol.Invalid("Offset zmiennej musi być liczbą całkowitą")
 
     if isinstance(result["offset"], float) and not result["offset"].is_integer():
-        raise vol.Invalid("Variable offset must be an integer")
+        raise vol.Invalid("Offset zmiennej musi być liczbą całkowitą")
 
     if offset < 0:
-        raise vol.Invalid("Variable offset cannot be negative")
+        raise vol.Invalid("Offset zmiennej nie może być ujemny")
 
     result["offset"] = offset
     result["type"] = normalize_type(result["type"])
@@ -71,27 +71,27 @@ def validate_variable(variable):
 
     if result["type"] not in SUPPORTED_TYPES:
         raise vol.Invalid(
-            f"Unsupported variable type: {result['type']}"
+            f"Nieobsługiwany typ zmiennej: {result['type']}"
         )
 
     if result["entity"] not in READ_ENTITIES + WRITE_ENTITIES:
         raise vol.Invalid(
-            f"Unsupported entity type: {result['entity']}"
+            f"Nieobsługiwany typ encji: {result['entity']}"
         )
 
     if result["type"] == "BOOL":
         if result["entity"] not in ("binary_sensor", "switch"):
             raise vol.Invalid(
-                "BOOL must use binary_sensor or switch"
+                "BOOL musi używać binary_sensor lub switch"
             )
     elif result["entity"] in ("binary_sensor", "switch"):
         raise vol.Invalid(
-            "Only BOOL can use binary_sensor or switch"
+            "Tylko BOOL może używać binary_sensor lub switch"
         )
 
     if result["type"] == "STRING":
         if result["entity"] != "sensor":
-            raise vol.Invalid("STRING can only use sensor")
+            raise vol.Invalid("STRING może używać tylko sensora")
 
         try:
             result["length"] = string_length(result.get("length"))
@@ -124,24 +124,24 @@ def validate_variable(variable):
             result["max"] = float(result["max"])
             result["step"] = float(result["step"])
         except (TypeError, ValueError, OverflowError):
-            raise vol.Invalid("Invalid number min/max/step")
+            raise vol.Invalid("Nieprawidłowe min/max/step dla number")
 
         if result["min"] >= result["max"]:
-            raise vol.Invalid("Number min must be lower than max")
+            raise vol.Invalid("min dla number musi być mniejsze niż max")
 
         if result["step"] <= 0:
-            raise vol.Invalid("Number step must be positive")
+            raise vol.Invalid("step dla number musi być dodatni")
 
         try:
             initial_value = float(result["initial_value"])
 
             if not result["min"] <= initial_value <= result["max"]:
                 raise ValueError(
-                    "initial_value is outside number min/max"
+                    "initial_value jest poza zakresem min/max dla number"
                 )
         except (ValueError, TypeError, OverflowError) as err:
             raise vol.Invalid(
-                f"Invalid initial_value for {result['name']}: {err}"
+                f"Nieprawidłowa initial_value dla {result['name']}: {err}"
             )
 
     return result
@@ -149,7 +149,7 @@ def validate_variable(variable):
 
 def validate_device(device):
     if not isinstance(device, dict):
-        raise vol.Invalid("Device configuration must be a dictionary")
+        raise vol.Invalid("Konfiguracja urządzenia musi być słownikiem")
 
     result = dict(device)
 
@@ -157,7 +157,7 @@ def validate_device(device):
         result["ip_address"] = str(result["ip_address"])
         ipaddress.ip_address(result["ip_address"])
     except (KeyError, ValueError):
-        raise vol.Invalid("Invalid ip_address")
+        raise vol.Invalid("Nieprawidłowy ip_address")
 
     result.setdefault("port", DEFAULT_PORT)
     result.setdefault("mode", MODE_READ)
@@ -166,52 +166,52 @@ def validate_device(device):
     result.setdefault("min_interval", DEFAULT_MIN_INTERVAL)
     result.setdefault("update_interval", DEFAULT_UPDATE_INTERVAL)
 
-    # transmit_checksum was removed: the checksum algorithm is unknown.
+    # transmit_checksum zostało usunięte: algorytm sumy kontrolnej jest nieznany.
     legacy_transmit_checksum = result.pop("transmit_checksum", False)
 
     try:
         result["port"] = int(result["port"])
         result["list_id"] = int(result["list_id"])
     except (KeyError, TypeError, ValueError, OverflowError):
-        raise vol.Invalid("port and list_id must be integers")
+        raise vol.Invalid("port i list_id muszą być liczbami całkowitymi")
 
     if not 1 <= result["port"] <= 65535:
-        raise vol.Invalid("port must be between 1 and 65535")
+        raise vol.Invalid("port musi być z przedziału 1 do 65535")
 
     if not 0 <= result["list_id"] <= 65535:
-        raise vol.Invalid("list_id must be between 0 and 65535")
+        raise vol.Invalid("list_id musi być z przedziału 0 do 65535")
 
     if result["mode"] not in (MODE_READ, MODE_WRITE):
-        raise vol.Invalid("mode must be read or write")
+        raise vol.Invalid("mode musi być read lub write")
 
     if not isinstance(result["pack_variables"], bool):
-        raise vol.Invalid("pack_variables must be boolean")
+        raise vol.Invalid("pack_variables musi być wartością logiczną")
 
     if not isinstance(result["on_change"], bool):
-        raise vol.Invalid("on_change must be boolean")
+        raise vol.Invalid("on_change musi być wartością logiczną")
 
     try:
         result["min_interval"] = int(result["min_interval"])
         result["update_interval"] = int(result["update_interval"])
     except (TypeError, ValueError, OverflowError):
-        raise vol.Invalid("min_interval and update_interval must be integers")
+        raise vol.Invalid("min_interval i update_interval muszą być liczbami całkowitymi")
 
     if result["min_interval"] < 0:
-        raise vol.Invalid("min_interval must be >= 0")
+        raise vol.Invalid("min_interval musi być >= 0")
 
     if result["update_interval"] < 0:
-        raise vol.Invalid("update_interval must be >= 0")
+        raise vol.Invalid("update_interval musi być >= 0")
 
     if legacy_transmit_checksum is True and result["mode"] == MODE_WRITE:
         raise vol.Invalid(
-            "transmit_checksum is no longer supported. Remove it and "
-            "disable checksum checking on the PLC receive list"
+            "transmit_checksum nie jest już obsługiwane. Usuń je i "
+            "wyłącz sprawdzanie sumy kontrolnej na liście odbiorczej PLC"
         )
 
     variables = result.get("variables")
 
     if not isinstance(variables, list) or not variables:
-        raise vol.Invalid("At least one variable is required")
+        raise vol.Invalid("Wymagane jest co najmniej jedna zmienna")
 
     result["variables"] = [
         validate_variable(item) for item in variables
@@ -221,12 +221,12 @@ def validate_device(device):
         if result["mode"] == MODE_READ:
             if variable["entity"] not in READ_ENTITIES:
                 raise vol.Invalid(
-                    "Read lists can only contain sensor and binary_sensor"
+                    "Listy odczytowe mogą zawierać tylko sensor i binary_sensor"
                 )
         else:
             if variable["entity"] not in WRITE_ENTITIES:
                 raise vol.Invalid(
-                    "Write lists can only contain switch and number"
+                    "Listy zapisu mogą zawierać tylko switch i number"
                 )
 
     ranges = []
@@ -238,7 +238,7 @@ def validate_device(device):
         for other_start, other_end in ranges:
             if start < other_end and other_start < end:
                 raise vol.Invalid(
-                    f"Overlapping variable offset at {start}"
+                    f"Nakładający się offset zmiennej przy {start}"
                 )
 
         ranges.append((start, end))
@@ -273,11 +273,11 @@ class NetVarUDPProtocol(asyncio.DatagramProtocol):
         self.hub.handle_packet(data, addr)
 
     def error_received(self, exc):
-        _LOGGER.error("NetVar UDP error: %s", exc)
+        _LOGGER.error("Błąd NetVar UDP: %s", exc)
 
     def connection_lost(self, exc):
         if exc:
-            _LOGGER.warning("NetVar UDP connection lost: %s", exc)
+            _LOGGER.warning("Połączenie NetVar UDP utracone: %s", exc)
 
 
 class NetVarPortHub:
@@ -299,7 +299,7 @@ class NetVarPortHub:
         )
 
         _LOGGER.info(
-            "NetVar UDP listening on port %d",
+            "NetVar UDP nasłuchuje na porcie %d",
             self.port,
         )
 
@@ -314,7 +314,7 @@ class NetVarPortHub:
 
         if key in self.coordinators:
             raise ValueError(
-                f"Duplicate NetVar list configuration: {key}"
+                f"Zduplikowana konfiguracja listy NetVar: {key}"
             )
 
         self.coordinators[key] = coordinator
@@ -325,7 +325,7 @@ class NetVarPortHub:
 
     def sendto(self, data, address):
         if self.transport is None:
-            _LOGGER.error("NetVar UDP transport is not available")
+            _LOGGER.error("Transport NetVar UDP nie jest dostępny")
             return False
 
         self.transport.sendto(data, address)
@@ -358,7 +358,7 @@ class NetVarPortHub:
 
         if coordinator is None:
             _LOGGER.debug(
-                "No configuration for PLC %s list %d",
+                "Brak konfiguracji dla PLC %s listy %d",
                 addr[0],
                 list_id,
             )
@@ -368,7 +368,7 @@ class NetVarPortHub:
             coordinator.rejected_packets += 1
             coordinator.rx_errors += 1
             _LOGGER.warning(
-                "Invalid packet length: header=%d actual=%d",
+                "Nieprawidłowa długość ramki: nagłówek=%d rzeczywista=%d",
                 total_length,
                 len(data),
             )
@@ -377,8 +377,8 @@ class NetVarPortHub:
         payload = data[HEADER_SIZE:]
 
         _LOGGER.debug(
-            "RX %s:%d list=%d index=%d count=%d "
-            "sequence=%d header_bytes_18_19=%02X %02X payload=%s",
+            "RX %s:%d lista=%d index=%d count=%d "
+            "sequence=%d bajty_naglowka_18_19=%02X %02X ładunek=%s",
             addr[0],
             self.port,
             list_id,
@@ -421,7 +421,7 @@ class NetVarCoordinator:
 
         self.payload = bytearray(self.buffer_size)
 
-        # Variables received at least once.
+        # Zmienne, które zostały odebrane co najmniej raz.
         self.received = set()
 
         self.last_checksum = 0
@@ -473,7 +473,7 @@ class NetVarCoordinator:
                 callback(data, set(updated_indices))
             except Exception:
                 _LOGGER.exception(
-                    "Error notifying NetVar listener for list %d",
+                    "Błąd powiadamiania słuchacza NetVar dla listy %d",
                     self.list_id,
                 )
 
@@ -489,7 +489,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.debug(
-                "Unpacked packet has variable_count=%d, expected 1",
+                "Pakiet niepakowany ma variable_count=%d, oczekiwano 1",
                 variable_count,
             )
             return
@@ -498,7 +498,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.warning(
-                "Invalid variable index %d for list %d",
+                "Nieprawidłowy index zmiennej %d dla listy %d",
                 variable_index,
                 self.list_id,
             )
@@ -511,7 +511,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.warning(
-                "List %d variable %d payload length %d, expected %d",
+                "Lista %d zmienna %d długość ładunku %d, oczekiwano %d",
                 self.list_id,
                 variable_index,
                 len(payload),
@@ -525,11 +525,11 @@ class NetVarCoordinator:
         self.received.add(variable_index)
         self.last_checksum = checksum
 
-        # Publish immediately after every valid frame.
+        # Publikuj natychmiast po każdej poprawnej ramce.
         self.notify({variable_index})
 
         _LOGGER.debug(
-            "List %d: received variable %d",
+            "Lista %d: odebrano zmienną %d",
             self.list_id,
             variable_index,
         )
@@ -546,7 +546,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.warning(
-                "Packed list %d has unexpected index %d",
+                "Pakowana lista %d ma nieoczekiwany index %d",
                 self.list_id,
                 variable_index,
             )
@@ -556,7 +556,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.warning(
-                "Packed list %d has count %d, expected %d",
+                "Pakowana lista %d ma count %d, oczekiwano %d",
                 self.list_id,
                 variable_count,
                 len(self.variables),
@@ -567,7 +567,7 @@ class NetVarCoordinator:
             self.rejected_packets += 1
             self.rx_errors += 1
             _LOGGER.warning(
-                "Packed list %d payload length %d, expected %d",
+                "Pakowana lista %d długość ładunku %d, oczekiwano %d",
                 self.list_id,
                 len(payload),
                 self.buffer_size,
@@ -612,7 +612,7 @@ class NetVarCoordinator:
 
     def set_variable(self, variable, value):
         if self.mode != MODE_WRITE:
-            raise ValueError("Cannot write to a read-only list")
+            raise ValueError("Nie można zapisać do listy tylko do odczytu")
 
         encoded = encode_value(
             value,
@@ -685,7 +685,7 @@ class NetVarCoordinator:
         if not sent:
             self.tx_errors += 1
             _LOGGER.error(
-                "TX failed PLC=%s:%d list=%d",
+                "Błąd TX PLC=%s:%d lista=%d",
                 self.ip_address,
                 self.port,
                 self.list_id,
@@ -695,7 +695,7 @@ class NetVarCoordinator:
         self.tx_packets += 1
 
         _LOGGER.info(
-            "TX PLC=%s:%d list=%d packed=%s payload=%s",
+            "TX PLC=%s:%d lista=%d pakowane=%s ładunek=%s",
             self.ip_address,
             self.port,
             self.list_id,
@@ -738,9 +738,9 @@ class NetVarCoordinator:
 
         header[16:18] = self.tx_sequence.to_bytes(2, "little")
 
-        # Flags and checksum (bytes 18-19) are always 00 00: the checksum
-        # algorithm is unknown, so it is not generated. The PLC receive
-        # list must have checksum checking disabled.
+        # Flagi i suma kontrolna (bajty 18-19) zawsze 00 00: algorytm sumy
+        # kontrolnej jest nieznany, więc nie jest generowany. Lista odbiorcza
+        # w PLC musi mieć wyłączone sprawdzanie sumy kontrolnej.
         header[18:20] = b"\x00\x00"
 
         self.tx_sequence = (self.tx_sequence + 1) & 0xFFFF
@@ -817,8 +817,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         for variable in coordinator.variables:
             platforms.add(variable["entity"])
 
-        if coordinator.mode == MODE_READ:
-            platforms.add("sensor")
+        # Sensory diagnostyczne są zawsze tworzone, więc platforma sensor
+        # jest wymagana niezależnie od trybu listy.
+        platforms.add("sensor")
 
     for platform in platforms:
         hass.async_create_task(
