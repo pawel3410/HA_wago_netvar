@@ -8,6 +8,9 @@ from homeassistant import config_entries
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
+    DEFAULT_ON_CHANGE,
+    DEFAULT_MIN_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     MODE_READ,
     MODE_WRITE,
     SUPPORTED_TYPES,
@@ -75,6 +78,27 @@ class WagoNetVarConfigFlow(
                     "pack_variables",
                     default=True,
                 ): bool,
+
+                vol.Optional(
+                    "on_change",
+                    default=DEFAULT_ON_CHANGE,
+                ): bool,
+
+                vol.Optional(
+                    "min_interval",
+                    default=DEFAULT_MIN_INTERVAL,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=0),
+                ),
+
+                vol.Optional(
+                    "update_interval",
+                    default=DEFAULT_UPDATE_INTERVAL,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=0),
+                ),
 
             }
         )
