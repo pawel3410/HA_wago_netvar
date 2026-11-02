@@ -195,7 +195,7 @@ Nagłówek ma 20 bajtów. Każdy datagram UDP zawiera dokładnie jedną ramkę.
 | 0 | 4 bajty | Sygnatura `00 2D 53 33` |
 | 4 | 4 bajty | Pole zarezerwowane |
 | 8 | 2 bajty | List ID |
-| 10 | 2 bajty | Indeks zmiennej |
+| 10 | 2 bajty | index zmiennej w trybie niepakowanym    |
 | 12 | 2 bajty | Liczba zmiennych (`var_count`) |
 | 14 | 2 bajty | Długość całej ramki (`frame_size`) |
 | 16 | 2 bajty | Numer sequence / cyklu |
