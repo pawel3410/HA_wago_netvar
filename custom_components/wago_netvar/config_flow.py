@@ -26,7 +26,7 @@ def _validate_ip_address(value):
     try:
         ipaddress.ip_address(value)
     except ValueError:
-        raise vol.Invalid("Invalid IP address")
+        raise vol.Invalid("Nieprawidłowy adres IP")
 
     return value
 
@@ -35,7 +35,7 @@ class WagoNetVarConfigFlow(
     config_entries.ConfigFlow,
     domain=DOMAIN,
 ):
-    """Configuration flow for Wago NetVar."""
+    """Konfiguracja przepływu dla Wago NetVar."""
 
     VERSION = 1
 
