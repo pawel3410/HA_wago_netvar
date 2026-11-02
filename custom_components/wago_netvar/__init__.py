@@ -56,9 +56,10 @@ def validate_variable(variable):
 
     try:
         offset = int(result["offset"])
-        if float(result["offset"]) != offset:
-            raise ValueError
     except (TypeError, ValueError, OverflowError):
+        raise vol.Invalid("Variable offset must be an integer")
+
+    if isinstance(result["offset"], float) and not result["offset"].is_integer():
         raise vol.Invalid("Variable offset must be an integer")
 
     if offset < 0:
@@ -365,6 +366,7 @@ class NetVarPortHub:
 
         if total_length != len(data):
             coordinator.rejected_packets += 1
+            coordinator.rx_errors += 1
             _LOGGER.warning(
                 "Invalid packet length: header=%d actual=%d",
                 total_length,
@@ -485,6 +487,7 @@ class NetVarCoordinator:
     ):
         if variable_count != 1:
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.debug(
                 "Unpacked packet has variable_count=%d, expected 1",
                 variable_count,
@@ -493,6 +496,7 @@ class NetVarCoordinator:
 
         if not 0 <= variable_index < len(self.variables):
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.warning(
                 "Invalid variable index %d for list %d",
                 variable_index,
@@ -505,6 +509,7 @@ class NetVarCoordinator:
 
         if len(payload) != size:
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.warning(
                 "List %d variable %d payload length %d, expected %d",
                 self.list_id,
@@ -539,6 +544,7 @@ class NetVarCoordinator:
     ):
         if variable_index != 0:
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.warning(
                 "Packed list %d has unexpected index %d",
                 self.list_id,
@@ -548,6 +554,7 @@ class NetVarCoordinator:
 
         if variable_count != len(self.variables):
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.warning(
                 "Packed list %d has count %d, expected %d",
                 self.list_id,
@@ -558,6 +565,7 @@ class NetVarCoordinator:
 
         if len(payload) != self.buffer_size:
             self.rejected_packets += 1
+            self.rx_errors += 1
             _LOGGER.warning(
                 "Packed list %d payload length %d, expected %d",
                 self.list_id,
