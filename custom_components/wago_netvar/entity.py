@@ -1,3 +1,4 @@
+
 import logging
 
 from homeassistant.helpers.entity import Entity
@@ -36,12 +37,21 @@ class NetVarEntity(Entity):
             True,
         )
 
+        self._attr_should_poll = False
+
         category = variable.get("entity_category")
 
         if category:
-            from homeassistant.helpers.entity import EntityCategory
+            try:
+                from homeassistant.helpers.entity import EntityCategory
 
-            self._attr_entity_category = EntityCategory(category)
+                self._attr_entity_category = EntityCategory(category)
+            except ValueError:
+                _LOGGER.warning(
+                    "Invalid entity_category %s for variable %s",
+                    category,
+                    variable["name"],
+                )
 
     @property
     def available(self):
