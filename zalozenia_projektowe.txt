@@ -12,8 +12,11 @@ Założenia projektowe dla homeassistant i esphome:
 - wysyłana zmienna jest konwertowana na odpowiedni typ danych którą jest wysyłana (przy przepełnieniu mniej znaczace bity sa ucinane, przy STRING liczby zamieniane na text),
 - wysyłanie listy na IP_address (możliwy broadcast 255.255.255.255), port, zadeklarowany list_ID,
 - wysyłanie listy przy zmianie on_change (domyslnie no, min_interval domyslnie 500ms), oraz cyklicznie update_interval (domyslnie 5s, dla 0s brak wysyłania przez update_interval jezeli aktywowany) działajacy rownolegle z on_change,
-- dokumentacja README.md musi zawierac typy obsługiwanych danych, odpowiadajace im typy w homeassistant i esphome, szczegółową budowe ramki NetVar, opisane wszystkie opcje konfiguracyjne i pozostałe szczegółowe informacje oraz przykłady. Komentarze w kodzie w jezyku polskim,
-- projekt ma sie składać z niezbędnej liczby plików, jezeli się da, to ogranicz ich liczbę, wersja dla esphome ma się uruchamiać na arduino a także na esp-idf i implementowac dump_config()
+- dokumentacja README.md musi zawierac typy obsługiwanych danych, odpowiadajace im typy w homeassistant i esphome, szczegółową budowe ramki NetVar, opisane wszystkie opcje konfiguracyjne i pozostałe szczegółowe informacje oraz przykłady,
+- komentarze w kodzie w jezyku polskim,
+- projekt ma sie składać z niezbędnej liczby plików, jezeli się da, to ogranicz ich liczbę,
+- wersja dla esphome ma się uruchamiać na arduino a także na esp-idf i implementowac dump_config(),
+- wersja dla Homeassistant ma być konfigurowana zarówno przez UI jak i tekstowo
 
 
 
