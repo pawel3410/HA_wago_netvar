@@ -7,6 +7,10 @@ HEADER_SIZE = 20
 MODE_READ = "read"
 MODE_WRITE = "write"
 
+DEFAULT_ON_CHANGE = False
+DEFAULT_MIN_INTERVAL = 500  # milliseconds
+DEFAULT_UPDATE_INTERVAL = 5  # seconds, 0 = disabled
+
 # Integer-like types: name -> (size in bytes, signed).
 # TIME is a 32-bit number of milliseconds. DATE and DT are 32-bit numbers of
 # seconds since 1970-01-01, TOD is a 32-bit number of milliseconds since
