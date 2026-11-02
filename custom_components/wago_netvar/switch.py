@@ -1,4 +1,3 @@
-
 import logging
 
 from homeassistant.components.switch import SwitchEntity
@@ -14,6 +13,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _to_bool(value):
+    """Konwersja wartości na bool dla typu BOOL."""
     if isinstance(value, bool):
         return value
 
@@ -36,6 +36,7 @@ def _to_bool(value):
 
 
 def _get_yaml_entities(hass):
+    """Tworzenie encji switch z konfiguracji YAML."""
     entities = []
 
     devices = hass.data.get(DOMAIN, {}).get("devices", {})
@@ -61,6 +62,7 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info=None,
 ):
+    """Konfiguracja platformy switch z YAML."""
     async_add_entities(_get_yaml_entities(hass))
 
 
@@ -69,6 +71,7 @@ async def async_setup_entry(
     entry,
     async_add_entities: AddEntitiesCallback,
 ):
+    """Konfiguracja platformy switch z wpisu konfiguracyjnego."""
     device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
         entry.entry_id
     )
@@ -88,6 +91,8 @@ async def async_setup_entry(
 
 
 class NetVarSwitch(NetVarEntity, SwitchEntity):
+    """Przełącznik NetVar."""
+
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
