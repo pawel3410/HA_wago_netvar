@@ -8,13 +8,13 @@ MODE_READ = "read"
 MODE_WRITE = "write"
 
 DEFAULT_ON_CHANGE = False
-DEFAULT_MIN_INTERVAL = 500  # milliseconds
-DEFAULT_UPDATE_INTERVAL = 5  # seconds, 0 = disabled
+DEFAULT_MIN_INTERVAL = 500  # milisekundy
+DEFAULT_UPDATE_INTERVAL = 5  # sekundy, 0 = wyłączone
 
-# Integer-like types: name -> (size in bytes, signed).
-# TIME is a 32-bit number of milliseconds. DATE and DT are 32-bit numbers of
-# seconds since 1970-01-01, TOD is a 32-bit number of milliseconds since
-# midnight. DATE, TOD and DT are handled as raw unsigned integers.
+# Typy całkowite: nazwa -> (rozmiar w bajtach, znak).
+# TIME to 32-bitowa liczba milisekund. DATE i DT to 32-bitowe liczby
+# sekund od 1970-01-01, TOD to 32-bitowa liczba milisekund od północy.
+# DATE, TOD i DT są obsługiwane jako surowe liczby unsigned.
 INTEGER_TYPES = {
     "BYTE": (1, False),
     "USINT": (1, False),
@@ -31,7 +31,7 @@ INTEGER_TYPES = {
     "DT": (4, False),
 }
 
-# Fixed-size types. STRING has a configurable size and is handled separately.
+# Typy o stałym rozmiarze. STRING ma konfigurowalny rozmiar i jest obsługiwane osobno.
 TYPE_SIZES = {
     "BOOL": 1,
     "REAL": 4,
