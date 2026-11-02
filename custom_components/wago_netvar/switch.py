@@ -32,7 +32,7 @@ def _to_bool(value):
         if normalized in ("false", "off", "0"):
             return False
 
-    raise ValueError(f"Invalid BOOL value: {value}")
+    raise ValueError(f"Nieprawidłowa wartość BOOL: {value}")
 
 
 def _get_yaml_entities(hass):
@@ -107,12 +107,12 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
             )
         except (ValueError, OSError) as err:
             _LOGGER.error(
-                "Cannot turn on %s: %s",
+                "Nie można włączyć %s: %s",
                 self.variable["name"],
                 err,
             )
             raise HomeAssistantError(
-                f"Cannot send value to PLC: {err}"
+                f"Nie można wysłać wartości do PLC: {err}"
             ) from err
 
         self._attr_is_on = True
@@ -126,12 +126,12 @@ class NetVarSwitch(NetVarEntity, SwitchEntity):
             )
         except (ValueError, OSError) as err:
             _LOGGER.error(
-                "Cannot turn off %s: %s",
+                "Nie można wyłączyć %s: %s",
                 self.variable["name"],
                 err,
             )
             raise HomeAssistantError(
-                f"Cannot send value to PLC: {err}"
+                f"Nie można wysłać wartości do PLC: {err}"
             ) from err
 
         self._attr_is_on = False
