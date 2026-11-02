@@ -1,5 +1,6 @@
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -22,9 +23,15 @@ def _get_yaml_entities(hass):
                     NetVarSensor(coordinator, variable)
                 )
 
-        if coordinator.mode == "read":
+        for sensor_type in (
+            "rx_packets",
+            "tx_packets",
+            "rx_errors",
+            "tx_errors",
+            "rejected_packets",
+        ):
             entities.append(
-                NetVarPacketStatusSensor(coordinator)
+                NetVarDiagnosticSensor(coordinator, sensor_type)
             )
 
     return entities
@@ -59,9 +66,15 @@ async def async_setup_entry(
         if variable["entity"] == "sensor"
     ]
 
-    if coordinator.mode == "read":
+    for sensor_type in (
+        "rx_packets",
+        "tx_packets",
+        "rx_errors",
+        "tx_errors",
+        "rejected_packets",
+    ):
         entities.append(
-            NetVarPacketStatusSensor(coordinator)
+            NetVarDiagnosticSensor(coordinator, sensor_type)
         )
 
     async_add_entities(entities)
@@ -96,57 +109,29 @@ class NetVarSensor(NetVarEntity, SensorEntity):
             self._attr_native_value = value
 
 
-class NetVarPacketStatusSensor(SensorEntity):
-    def __init__(self, coordinator):
+class NetVarDiagnosticSensor(SensorEntity):
+    def __init__(self, coordinator, sensor_type):
         self.coordinator = coordinator
+        self._sensor_type = sensor_type
 
         self._attr_name = (
-            f"NetVar List {coordinator.list_id} packet status"
+            f"NetVar List {coordinator.list_id} {sensor_type}"
         )
 
         self._attr_unique_id = (
             f"{DOMAIN}_{coordinator.ip_address}_"
             f"{coordinator.port}_{coordinator.list_id}_"
-            "packet_status"
+            f"{sensor_type}"
         )
 
-        self._attr_icon = "mdi:package-check"
-        self._attr_entity_category = None
+        self._attr_icon = "mdi:counter"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_should_poll = False
+        self._attr_native_value = 0
 
     @property
     def native_value(self):
-        if self.coordinator.packet_complete:
-            return "complete"
-
-        return "incomplete"
-
-    @property
-    def extra_state_attributes(self):
-        coordinator = self.coordinator
-
-        received = sorted(coordinator.cycle_received)
-        expected = coordinator.expected_count
-
-        missing = sorted(
-            set(range(expected)) - coordinator.cycle_received
-        )
-
-        return {
-            "list_id": coordinator.list_id,
-            "sequence": coordinator.current_sequence,
-            "received_count": len(received),
-            "expected_count": expected,
-            "received_indices": received,
-            "missing_indices": missing,
-            "ever_received_count": len(coordinator.received),
-            "packed": coordinator.pack_variables,
-            # Bytes 18-19 of the last frame, in wire order (e.g. "02 DB").
-            "checksum_field": (
-                f"{coordinator.last_checksum & 0xFF:02X} "
-                f"{coordinator.last_checksum >> 8:02X}"
-            ),
-        }
+        return getattr(self.coordinator, self._sensor_type, 0)
 
     async def async_added_to_hass(self):
         self.coordinator.register_listener(
