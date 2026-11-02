@@ -2,6 +2,7 @@
 import asyncio
 import ipaddress
 import logging
+import time
 
 import voluptuous as vol
 
@@ -13,6 +14,9 @@ import homeassistant.helpers.config_validation as cv
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
+    DEFAULT_ON_CHANGE,
+    DEFAULT_MIN_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     MAGIC,
     HEADER_SIZE,
     MODE_READ,
@@ -134,9 +138,6 @@ def validate_variable(variable):
                 raise ValueError(
                     "initial_value is outside number min/max"
                 )
-
-            encode_value(result["initial_value"], result["type"])
-
         except (ValueError, TypeError, OverflowError) as err:
             raise vol.Invalid(
                 f"Invalid initial_value for {result['name']}: {err}"
@@ -160,6 +161,9 @@ def validate_device(device):
     result.setdefault("port", DEFAULT_PORT)
     result.setdefault("mode", MODE_READ)
     result.setdefault("pack_variables", True)
+    result.setdefault("on_change", DEFAULT_ON_CHANGE)
+    result.setdefault("min_interval", DEFAULT_MIN_INTERVAL)
+    result.setdefault("update_interval", DEFAULT_UPDATE_INTERVAL)
 
     # transmit_checksum was removed: the checksum algorithm is unknown.
     legacy_transmit_checksum = result.pop("transmit_checksum", False)
@@ -181,6 +185,21 @@ def validate_device(device):
 
     if not isinstance(result["pack_variables"], bool):
         raise vol.Invalid("pack_variables must be boolean")
+
+    if not isinstance(result["on_change"], bool):
+        raise vol.Invalid("on_change must be boolean")
+
+    try:
+        result["min_interval"] = int(result["min_interval"])
+        result["update_interval"] = int(result["update_interval"])
+    except (TypeError, ValueError, OverflowError):
+        raise vol.Invalid("min_interval and update_interval must be integers")
+
+    if result["min_interval"] < 0:
+        raise vol.Invalid("min_interval must be >= 0")
+
+    if result["update_interval"] < 0:
+        raise vol.Invalid("update_interval must be >= 0")
 
     if legacy_transmit_checksum is True and result["mode"] == MODE_WRITE:
         raise vol.Invalid(
@@ -311,16 +330,20 @@ class NetVarPortHub:
         self.transport.sendto(data, address)
         return True
 
+    def _find_coordinator(self, ip, list_id):
+        for coordinator in self.coordinators.values():
+            if coordinator.list_id == list_id and (
+                coordinator.ip_address == "0.0.0.0"
+                or coordinator.ip_address == ip
+            ):
+                return coordinator
+        return None
+
     def handle_packet(self, data, addr):
         if len(data) < HEADER_SIZE:
-            _LOGGER.debug(
-                "Ignored short UDP packet from %s",
-                addr[0],
-            )
             return
 
         if data[0:4] != MAGIC:
-            _LOGGER.debug("Ignored packet with invalid magic")
             return
 
         list_id = int.from_bytes(data[8:10], "little")
@@ -330,17 +353,7 @@ class NetVarPortHub:
         sequence = int.from_bytes(data[16:18], "little")
         checksum = int.from_bytes(data[18:20], "little")
 
-        if total_length != len(data):
-            _LOGGER.warning(
-                "Invalid packet length: header=%d actual=%d",
-                total_length,
-                len(data),
-            )
-            return
-
-        payload = data[HEADER_SIZE:]
-
-        coordinator = self.coordinators.get((addr[0], list_id))
+        coordinator = self._find_coordinator(addr[0], list_id)
 
         if coordinator is None:
             _LOGGER.debug(
@@ -350,9 +363,20 @@ class NetVarPortHub:
             )
             return
 
+        if total_length != len(data):
+            coordinator.rejected_packets += 1
+            _LOGGER.warning(
+                "Invalid packet length: header=%d actual=%d",
+                total_length,
+                len(data),
+            )
+            return
+
+        payload = data[HEADER_SIZE:]
+
         _LOGGER.debug(
             "RX %s:%d list=%d index=%d count=%d "
-            "cycle=%d header_bytes_18_19=%02X %02X payload=%s",
+            "sequence=%d header_bytes_18_19=%02X %02X payload=%s",
             addr[0],
             self.port,
             list_id,
@@ -364,6 +388,7 @@ class NetVarPortHub:
             payload.hex(),
         )
 
+        coordinator.rx_packets += 1
         coordinator.handle_packet(
             payload=payload,
             variable_index=variable_index,
@@ -385,6 +410,9 @@ class NetVarCoordinator:
         self.mode = config["mode"]
 
         self.pack_variables = config["pack_variables"]
+        self.on_change = config["on_change"]
+        self.min_interval = config["min_interval"]
+        self.update_interval = config["update_interval"]
 
         self.variables = config["variables"]
         self.buffer_size = config["buffer_size"]
@@ -394,15 +422,20 @@ class NetVarCoordinator:
         # Variables received at least once.
         self.received = set()
 
-        # Variables received in the current sequence.
-        self.cycle_received = set()
-
-        self.last_sequence = None
-        self.current_sequence = None
         self.last_checksum = 0
 
         self.listeners = []
         self.tx_sequence = 0
+
+        self.rx_packets = 0
+        self.tx_packets = 0
+        self.rx_errors = 0
+        self.tx_errors = 0
+        self.rejected_packets = 0
+
+        self.last_send_time = 0.0
+        self.send_timer = None
+        self.periodic_task = None
 
         if self.mode == MODE_WRITE:
             for variable in self.variables:
@@ -418,20 +451,6 @@ class NetVarCoordinator:
     @property
     def expected_count(self):
         return len(self.variables)
-
-    @property
-    def cycle_count(self):
-        return len(self.cycle_received)
-
-    @property
-    def packet_complete(self):
-        if self.mode != MODE_READ:
-            return True
-
-        if self.current_sequence is None:
-            return False
-
-        return self.cycle_count == self.expected_count
 
     def register_listener(self, callback):
         if callback not in self.listeners:
@@ -456,51 +475,6 @@ class NetVarCoordinator:
                     self.list_id,
                 )
 
-    def _start_cycle(self, sequence):
-        self.current_sequence = sequence
-        self.cycle_received = set()
-
-    def _begin_or_continue_cycle(self, sequence):
-        """Keep frames with the same sequence in one cycle.
-
-        Sequence is a 16-bit counter. A forward change starts a new cycle.
-        A change that moves backwards is treated as a PLC restart.
-        The modular comparison also handles the normal 65535 -> 0 wrap.
-        """
-        sequence &= 0xFFFF
-
-        if self.current_sequence is None:
-            self._start_cycle(sequence)
-            return
-
-        if sequence == self.current_sequence:
-            return
-
-        previous_sequence = self.current_sequence
-        delta = (sequence - previous_sequence) & 0xFFFF
-
-        self.last_sequence = previous_sequence
-        self._start_cycle(sequence)
-
-        if delta < 0x8000:
-            if delta > 1:
-                _LOGGER.debug(
-                    "List %d sequence advanced from %d to %d "
-                    "(%d sequence values skipped)",
-                    self.list_id,
-                    previous_sequence,
-                    sequence,
-                    delta - 1,
-                )
-        else:
-            _LOGGER.info(
-                "List %d sequence moved backwards from %d to %d; "
-                "starting a new cycle after PLC restart",
-                self.list_id,
-                previous_sequence,
-                sequence,
-            )
-
     def _handle_unpacked_packet(
         self,
         payload,
@@ -510,6 +484,7 @@ class NetVarCoordinator:
         checksum,
     ):
         if variable_count != 1:
+            self.rejected_packets += 1
             _LOGGER.debug(
                 "Unpacked packet has variable_count=%d, expected 1",
                 variable_count,
@@ -517,6 +492,7 @@ class NetVarCoordinator:
             return
 
         if not 0 <= variable_index < len(self.variables):
+            self.rejected_packets += 1
             _LOGGER.warning(
                 "Invalid variable index %d for list %d",
                 variable_index,
@@ -528,6 +504,7 @@ class NetVarCoordinator:
         size = variable_size(variable)
 
         if len(payload) != size:
+            self.rejected_packets += 1
             _LOGGER.warning(
                 "List %d variable %d payload length %d, expected %d",
                 self.list_id,
@@ -537,24 +514,19 @@ class NetVarCoordinator:
             )
             return
 
-        self._begin_or_continue_cycle(sequence)
-
         offset = variable["offset"]
         self.payload[offset:offset + size] = payload
 
         self.received.add(variable_index)
-        self.cycle_received.add(variable_index)
         self.last_checksum = checksum
 
         # Publish immediately after every valid frame.
         self.notify({variable_index})
 
         _LOGGER.debug(
-            "List %d cycle %d: received %d/%d variables",
+            "List %d: received variable %d",
             self.list_id,
-            sequence,
-            self.cycle_count,
-            self.expected_count,
+            variable_index,
         )
 
     def _handle_packed_packet(
@@ -566,6 +538,7 @@ class NetVarCoordinator:
         checksum,
     ):
         if variable_index != 0:
+            self.rejected_packets += 1
             _LOGGER.warning(
                 "Packed list %d has unexpected index %d",
                 self.list_id,
@@ -574,6 +547,7 @@ class NetVarCoordinator:
             return
 
         if variable_count != len(self.variables):
+            self.rejected_packets += 1
             _LOGGER.warning(
                 "Packed list %d has count %d, expected %d",
                 self.list_id,
@@ -583,6 +557,7 @@ class NetVarCoordinator:
             return
 
         if len(payload) != self.buffer_size:
+            self.rejected_packets += 1
             _LOGGER.warning(
                 "Packed list %d payload length %d, expected %d",
                 self.list_id,
@@ -591,14 +566,10 @@ class NetVarCoordinator:
             )
             return
 
-        self._begin_or_continue_cycle(sequence)
-
         self.payload[:] = payload
 
         all_indices = set(range(len(self.variables)))
-
         self.received = set(all_indices)
-        self.cycle_received = set(all_indices)
         self.last_checksum = checksum
 
         self.notify(all_indices)
@@ -642,20 +613,108 @@ class NetVarCoordinator:
         )
         offset = variable["offset"]
 
-        old_value = bytes(
-            self.payload[offset:offset + len(encoded)]
-        )
-
         self.payload[offset:offset + len(encoded)] = encoded
 
-        if not self.send_variable(variable):
-            self.payload[offset:offset + len(encoded)] = old_value
-            raise ValueError(
-                "NetVar packet was not sent. "
-                "Check the UDP transport."
+        self._schedule_send()
+
+    def _schedule_send(self):
+        if not self.on_change:
+            return
+
+        now = time.monotonic()
+
+        if self.min_interval <= 0:
+            self._send_all()
+            return
+
+        elapsed = now - self.last_send_time
+
+        if elapsed >= self.min_interval / 1000.0:
+            self._send_all()
+        else:
+            if self.send_timer is not None:
+                self.send_timer.cancel()
+
+            delay = (self.min_interval / 1000.0) - elapsed
+            loop = asyncio.get_running_loop()
+            self.send_timer = loop.call_later(delay, self._send_all)
+
+    def _send_all(self):
+        if self.mode != MODE_WRITE:
+            return
+
+        if self.pack_variables:
+            packet = self.build_packet(
+                bytes(self.payload),
+                0,
+                len(self.variables),
+            )
+            self._transmit(packet)
+        else:
+            for index, variable in enumerate(self.variables):
+                offset = variable["offset"]
+                size = variable_size(variable)
+
+                value = bytes(
+                    self.payload[offset:offset + size]
+                )
+
+                packet = self.build_packet(
+                    value,
+                    index,
+                    1,
+                )
+                self._transmit(packet)
+
+        self.last_send_time = time.monotonic()
+
+    def _transmit(self, packet):
+        sent = self.hub.sendto(
+            packet,
+            (self.ip_address, self.port),
+        )
+
+        if not sent:
+            self.tx_errors += 1
+            _LOGGER.error(
+                "TX failed PLC=%s:%d list=%d",
+                self.ip_address,
+                self.port,
+                self.list_id,
+            )
+            return
+
+        self.tx_packets += 1
+
+        _LOGGER.info(
+            "TX PLC=%s:%d list=%d packed=%s payload=%s",
+            self.ip_address,
+            self.port,
+            self.list_id,
+            self.pack_variables,
+            packet[HEADER_SIZE:].hex(),
+        )
+
+    async def _periodic_send(self):
+        while True:
+            await asyncio.sleep(self.update_interval)
+            if self.mode == MODE_WRITE:
+                self._send_all()
+
+    async def async_start(self):
+        if self.mode == MODE_WRITE and self.update_interval > 0:
+            self.periodic_task = asyncio.create_task(
+                self._periodic_send()
             )
 
-        self.notify()
+    async def async_stop(self):
+        if self.send_timer is not None:
+            self.send_timer.cancel()
+            self.send_timer = None
+
+        if self.periodic_task is not None:
+            self.periodic_task.cancel()
+            self.periodic_task = None
 
     def build_packet(self, payload, variable_index, variable_count):
         header = bytearray(HEADER_SIZE)
@@ -679,50 +738,6 @@ class NetVarCoordinator:
         self.tx_sequence = (self.tx_sequence + 1) & 0xFFFF
 
         return bytes(header) + payload
-
-    def send_variable(self, variable):
-        if self.mode != MODE_WRITE:
-            return False
-
-        if self.pack_variables:
-            packet = self.build_packet(
-                bytes(self.payload),
-                0,
-                len(self.variables),
-            )
-        else:
-            index = self.variables.index(variable)
-            offset = variable["offset"]
-            size = variable_size(variable)
-
-            value = bytes(
-                self.payload[offset:offset + size]
-            )
-
-            packet = self.build_packet(
-                value,
-                index,
-                1,
-            )
-
-        sent = self.hub.sendto(
-            packet,
-            (self.ip_address, self.port),
-        )
-
-        if not sent:
-            return False
-
-        _LOGGER.info(
-            "TX PLC=%s:%d list=%d packed=%s payload=%s",
-            self.ip_address,
-            self.port,
-            self.list_id,
-            self.pack_variables,
-            packet[HEADER_SIZE:].hex(),
-        )
-
-        return True
 
 
 async def _async_create_coordinator(hass, config):
@@ -750,6 +765,8 @@ async def _async_create_coordinator(hass, config):
             await hub.async_stop()
             hubs.pop(port, None)
         raise
+
+    await coordinator.async_start()
 
     return coordinator
 
@@ -851,6 +868,7 @@ async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
 
     if device:
         coordinator = device["coordinator"]
+        await coordinator.async_stop()
         hub = coordinator.hub
 
         hub.unregister(coordinator)
