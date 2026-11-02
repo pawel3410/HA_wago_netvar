@@ -26,7 +26,7 @@ class NetVarEntity(Entity):
         self._attr_unique_id = (
             f"{DOMAIN}_{coordinator.ip_address}_"
             f"{coordinator.port}_{coordinator.list_id}_"
-            f"{slugify(variable['name'])}"
+            f"{self._variable_index}_{slugify(variable['name'])}"
         )
 
         self._attr_icon = variable.get("icon")
@@ -48,7 +48,7 @@ class NetVarEntity(Entity):
                 self._attr_entity_category = EntityCategory(category)
             except ValueError:
                 _LOGGER.warning(
-                    "Invalid entity_category %s for variable %s",
+                    "Nieprawidłowa kategoria encji %s dla zmiennej %s",
                     category,
                     variable["name"],
                 )
@@ -99,7 +99,7 @@ class NetVarEntity(Entity):
 
         except (ValueError, TypeError, OverflowError):
             _LOGGER.exception(
-                "Cannot decode variable %s in list %d",
+                "Nie można zdekodować zmiennej %s na liście %d",
                 self.variable["name"],
                 self.coordinator.list_id,
             )
