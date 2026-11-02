@@ -1,4 +1,3 @@
-
 import asyncio
 import ipaddress
 import logging
@@ -36,6 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def validate_variable(variable):
+    """Walidacja definicji pojedynczej zmiennej NetVar."""
     if not isinstance(variable, dict):
         raise vol.Invalid("Definicja zmiennej musi być słownikiem")
 
@@ -108,6 +108,24 @@ def validate_variable(variable):
         default_initial_value = 0
 
     result.setdefault("initial_value", default_initial_value)
+
+    # Walidacja typu initial_value zgodnie z typem zmiennej.
+    if result["type"] == "BOOL":
+        if not isinstance(result["initial_value"], (bool, int, str)):
+            raise vol.Invalid(
+                "initial_value dla BOOL musi być wartością logiczną, liczbą lub tekstem"
+            )
+    elif result["type"] == "STRING":
+        if not isinstance(result["initial_value"], str):
+            raise vol.Invalid("initial_value dla STRING musi być tekstem")
+    else:
+        if isinstance(result["initial_value"], bool):
+            raise vol.Invalid("initial_value nie może być wartością logiczną")
+        try:
+            float(result["initial_value"])
+        except (TypeError, ValueError):
+            raise vol.Invalid("initial_value musi być liczbą")
+
     result.setdefault("enabled_by_default", True)
     result.setdefault("force_update", False)
 
@@ -148,6 +166,7 @@ def validate_variable(variable):
 
 
 def validate_device(device):
+    """Walidacja konfiguracji urządzenia (listy NetVar)."""
     if not isinstance(device, dict):
         raise vol.Invalid("Konfiguracja urządzenia musi być słownikiem")
 
@@ -263,6 +282,8 @@ CONFIG_SCHEMA = vol.Schema(
 
 
 class NetVarUDPProtocol(asyncio.DatagramProtocol):
+    """Protokół UDP dla NetVar."""
+
     def __init__(self, hub):
         self.hub = hub
 
@@ -281,6 +302,8 @@ class NetVarUDPProtocol(asyncio.DatagramProtocol):
 
 
 class NetVarPortHub:
+    """Hub zarządzający gniazdem UDP na danym porcie."""
+
     def __init__(self, hass, port):
         self.hass = hass
         self.port = port
@@ -289,6 +312,7 @@ class NetVarPortHub:
         self.coordinators = {}
 
     async def async_setup(self):
+        """Uruchomienie nasłuchiwania UDP na porcie."""
         loop = asyncio.get_running_loop()
 
         self.transport, self.protocol = (
@@ -304,12 +328,14 @@ class NetVarPortHub:
         )
 
     async def async_stop(self):
+        """Zatrzymanie gniazda UDP."""
         if self.transport is not None:
             self.transport.close()
             self.transport = None
             self.protocol = None
 
     def register(self, coordinator):
+        """Rejestracja koordynatora listy w hubie."""
         key = (coordinator.ip_address, coordinator.list_id)
 
         if key in self.coordinators:
@@ -320,10 +346,12 @@ class NetVarPortHub:
         self.coordinators[key] = coordinator
 
     def unregister(self, coordinator):
+        """Wyrejestrowanie koordynatora listy z huba."""
         key = (coordinator.ip_address, coordinator.list_id)
         self.coordinators.pop(key, None)
 
     def sendto(self, data, address):
+        """Wysyłanie danych UDP."""
         if self.transport is None:
             _LOGGER.error("Transport NetVar UDP nie jest dostępny")
             return False
@@ -332,15 +360,22 @@ class NetVarPortHub:
         return True
 
     def _find_coordinator(self, ip, list_id):
+        """Znalezienie koordynatora dla adresu IP i list ID.
+
+        Preferowane jest dokładne dopasowanie IP przed adresem 0.0.0.0.
+        """
+        wildcard = None
         for coordinator in self.coordinators.values():
-            if coordinator.list_id == list_id and (
-                coordinator.ip_address == "0.0.0.0"
-                or coordinator.ip_address == ip
-            ):
+            if coordinator.list_id != list_id:
+                continue
+            if coordinator.ip_address == ip:
                 return coordinator
-        return None
+            if coordinator.ip_address == "0.0.0.0":
+                wildcard = coordinator
+        return wildcard
 
     def handle_packet(self, data, addr):
+        """Obsługa otrzymanego pakietu UDP."""
         if len(data) < HEADER_SIZE:
             return
 
@@ -401,6 +436,8 @@ class NetVarPortHub:
 
 
 class NetVarCoordinator:
+    """Koordynator listy NetVar (odbiór i wysyłka)."""
+
     def __init__(self, hass, config, hub):
         self.hass = hass
         self.config = config
@@ -611,6 +648,7 @@ class NetVarCoordinator:
             )
 
     def set_variable(self, variable, value):
+        """Ustawienie wartości zmiennej w buforze i zaplanowanie wysyłki."""
         if self.mode != MODE_WRITE:
             raise ValueError("Nie można zapisać do listy tylko do odczytu")
 
@@ -626,6 +664,7 @@ class NetVarCoordinator:
         self._schedule_send()
 
     def _schedule_send(self):
+        """Zaplanowanie wysyłki z uwzględnieniem min_interval."""
         if not self.on_change:
             return
 
@@ -648,6 +687,7 @@ class NetVarCoordinator:
             self.send_timer = loop.call_later(delay, self._send_all)
 
     def _send_all(self):
+        """Wysłanie całej listy lub wszystkich zmiennych (tryb niepakowany)."""
         if self.mode != MODE_WRITE:
             return
 
@@ -677,6 +717,7 @@ class NetVarCoordinator:
         self.last_send_time = time.monotonic()
 
     def _transmit(self, packet):
+        """Transmisja pakietu UDP i aktualizacja liczników."""
         sent = self.hub.sendto(
             packet,
             (self.ip_address, self.port),
@@ -704,18 +745,21 @@ class NetVarCoordinator:
         )
 
     async def _periodic_send(self):
+        """Cykliczne wysyłanie listy co update_interval sekund."""
         while True:
             await asyncio.sleep(self.update_interval)
             if self.mode == MODE_WRITE:
                 self._send_all()
 
     async def async_start(self):
+        """Uruchomienie cyklicznego nadawania (jeśli włączone)."""
         if self.mode == MODE_WRITE and self.update_interval > 0:
             self.periodic_task = asyncio.create_task(
                 self._periodic_send()
             )
 
     async def async_stop(self):
+        """Zatrzymanie timera i zadania cyklicznego."""
         if self.send_timer is not None:
             self.send_timer.cancel()
             self.send_timer = None
@@ -725,6 +769,7 @@ class NetVarCoordinator:
             self.periodic_task = None
 
     def build_packet(self, payload, variable_index, variable_count):
+        """Budowa ramki NetVar UDP z nagłówkiem i ładunkiem."""
         header = bytearray(HEADER_SIZE)
 
         header[0:4] = MAGIC
@@ -749,6 +794,7 @@ class NetVarCoordinator:
 
 
 async def _async_create_coordinator(hass, config):
+    """Tworzenie i uruchomienie koordynatora na podstawie konfiguracji."""
     config = validate_device(config)
 
     runtime = hass.data.setdefault(DOMAIN, {})
@@ -780,6 +826,7 @@ async def _async_create_coordinator(hass, config):
 
 
 async def _async_stop_all(hass, _event):
+    """Zatrzymanie wszystkich hubów przy zamykaniu Home Assistant."""
     runtime = hass.data.get(DOMAIN, {})
 
     for hub in runtime.get("hubs", {}).values():
@@ -787,6 +834,7 @@ async def _async_stop_all(hass, _event):
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Integracja z konfiguracji YAML."""
     runtime = hass.data.setdefault(DOMAIN, {})
     runtime.setdefault("hubs", {})
     runtime.setdefault("devices", {})
@@ -843,6 +891,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
+    """Integracja z wpisu konfiguracyjnego (config flow)."""
     coordinator = await _async_create_coordinator(
         hass,
         dict(entry.data),
@@ -862,6 +911,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
+    """Wyładowanie wpisu konfiguracyjnego."""
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
         ["sensor", "binary_sensor", "switch", "number"],
