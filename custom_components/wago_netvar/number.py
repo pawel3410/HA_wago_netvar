@@ -1,37 +1,15 @@
 import logging
 import math
 
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
-from .entity import NetVarEntity
-
+from .entity import NetVarEntity, add_platform_entities
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _get_yaml_entities(hass):
-    """Tworzenie encji number z konfiguracji YAML."""
-    entities = []
-
-    devices = hass.data.get(DOMAIN, {}).get("devices", {})
-
-    for device in devices.values():
-        if device.get("source") != "yaml":
-            continue
-
-        coordinator = device["coordinator"]
-
-        for variable in coordinator.variables:
-            if variable["entity"] == "number":
-                entities.append(
-                    NetVarNumber(coordinator, variable)
-                )
-
-    return entities
 
 
 async def async_setup_platform(
@@ -41,120 +19,71 @@ async def async_setup_platform(
     discovery_info=None,
 ):
     """Konfiguracja platformy number z YAML."""
-    async_add_entities(_get_yaml_entities(hass))
+    add_platform_entities(hass, async_add_entities, "number", NetVarNumber)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry,
-    async_add_entities: AddEntitiesCallback,
-):
-    """Konfiguracja platformy number z wpisu konfiguracyjnego."""
-    device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
-        entry.entry_id
-    )
+class NetVarNumber(NetVarEntity, NumberEntity, RestoreEntity):
+    """Encja number NetVar (stan optymistyczny: PLC nie potwierdza zapisu).
 
-    if not device:
-        return
+    restore_value: po restarcie przywracana jest ostatnia wartość i wysyłana do PLC.
+    """
 
-    coordinator = device["coordinator"]
-
-    entities = [
-        NetVarNumber(coordinator, variable)
-        for variable in coordinator.variables
-        if variable["entity"] == "number"
-    ]
-
-    async_add_entities(entities)
-
-
-class NetVarNumber(NetVarEntity, NumberEntity):
-    """Encja number dla zmiennych NetVar."""
+    _attr_assumed_state = True
 
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
-        self._attr_native_min_value = float(
-            variable.get("min", 0)
-        )
-
-        self._attr_native_max_value = float(
-            variable.get("max", 100)
-        )
-
-        self._attr_native_step = float(
-            variable.get("step", 1)
-        )
-
+        # min, max, step i mode są uzupełnione i zweryfikowane w konfiguracji.
+        self._attr_native_min_value = variable["min"]
+        self._attr_native_max_value = variable["max"]
+        self._attr_native_step = variable["step"]
+        self._attr_mode = NumberMode(variable["mode"])
         self._attr_native_unit_of_measurement = variable.get(
             "unit_of_measurement"
         )
-
         self._attr_device_class = variable.get("device_class")
-
-        initial_value = float(
-            variable.get("initial_value", 0)
+        self._attr_native_value = float(
+            variable.get("initial_value", variable["min"])
         )
 
-        if not math.isfinite(initial_value):
-            initial_value = self._attr_native_min_value
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
 
-        self._attr_native_value = min(
-            max(
-                initial_value,
-                self._attr_native_min_value,
-            ),
-            self._attr_native_max_value,
-        )
+        if not self.variable.get("restore_value"):
+            return
 
-    def _update_value(self, value):
+        last = await self.async_get_last_state()
+
+        if last is None:
+            return
+
         try:
-            number = float(value)
+            number = float(last.state)
+        except (TypeError, ValueError):
+            return  # "unknown" / "unavailable"
 
-        except (TypeError, ValueError, OverflowError):
+        if not math.isfinite(number) or not (
+            self._attr_native_min_value <= number <= self._attr_native_max_value
+        ):
             return
 
-        if not math.isfinite(number):
-            return
-
-        self._attr_native_value = min(
-            max(
-                number,
-                self._attr_native_min_value,
-            ),
-            self._attr_native_max_value,
-        )
+        self.coordinator.set_variable(self.variable, number, restore=True)
+        self._attr_native_value = number
+        self.coordinator.schedule_startup_send()
 
     async def async_set_native_value(self, value):
-        try:
-            number = float(value)
+        number = float(value)
 
-        except (TypeError, ValueError, OverflowError) as err:
+        if not math.isfinite(number) or not (
+            self._attr_native_min_value <= number <= self._attr_native_max_value
+        ):
             raise HomeAssistantError(
-                "Nieprawidłowa wartość numeryczna"
-            ) from err
-
-        if not math.isfinite(number):
-            raise HomeAssistantError(
-                "Wartość numeryczna musi być skończona"
-            )
-
-        if number < self._attr_native_min_value:
-            raise HomeAssistantError(
-                "Wartość jest poniżej minimum"
-            )
-
-        if number > self._attr_native_max_value:
-            raise HomeAssistantError(
-                "Wartość jest powyżej maksimum"
+                f"Wartość {value} jest poza zakresem "
+                f"{self._attr_native_min_value}..{self._attr_native_max_value}"
             )
 
         try:
-            self.coordinator.set_variable(
-                self.variable,
-                number,
-            )
-
+            self.coordinator.set_variable(self.variable, number)
         except (ValueError, OSError) as err:
             _LOGGER.error(
                 "Nie można ustawić %s na %s: %s",
@@ -162,7 +91,6 @@ class NetVarNumber(NetVarEntity, NumberEntity):
                 number,
                 err,
             )
-
             raise HomeAssistantError(
                 f"Nie można wysłać wartości do PLC: {err}"
             ) from err
