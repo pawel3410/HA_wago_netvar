@@ -2,29 +2,7 @@ from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .entity import NetVarEntity
-
-
-def _get_yaml_entities(hass):
-    """Tworzenie encji binary_sensor z konfiguracji YAML."""
-    entities = []
-
-    devices = hass.data.get(DOMAIN, {}).get("devices", {})
-
-    for device in devices.values():
-        if device.get("source") != "yaml":
-            continue
-
-        coordinator = device["coordinator"]
-
-        for variable in coordinator.variables:
-            if variable["entity"] == "binary_sensor":
-                entities.append(
-                    NetVarBinarySensor(coordinator, variable)
-                )
-
-    return entities
+from .entity import NetVarEntity, add_platform_entities
 
 
 async def async_setup_platform(
@@ -34,31 +12,9 @@ async def async_setup_platform(
     discovery_info=None,
 ):
     """Konfiguracja platformy binary_sensor z YAML."""
-    async_add_entities(_get_yaml_entities(hass))
-
-
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry,
-    async_add_entities: AddEntitiesCallback,
-):
-    """Konfiguracja platformy binary_sensor z wpisu konfiguracyjnego."""
-    device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
-        entry.entry_id
+    add_platform_entities(
+        hass, async_add_entities, "binary_sensor", NetVarBinarySensor
     )
-
-    if not device:
-        return
-
-    coordinator = device["coordinator"]
-
-    entities = [
-        NetVarBinarySensor(coordinator, variable)
-        for variable in coordinator.variables
-        if variable["entity"] == "binary_sensor"
-    ]
-
-    async_add_entities(entities)
 
 
 class NetVarBinarySensor(NetVarEntity, BinarySensorEntity):
