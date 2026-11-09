@@ -1,0 +1,21 @@
+send_list:
+  name: Send list
+  description: Natychmiast wysyła listę write do PLC, niezależnie od on_change i update_interval.
+  fields:
+    list_id:
+      name: List ID
+      description: Identyfikator listy write.
+      required: true
+      example: 124
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
+    ip_address:
+      name: IP address
+      description: Adres docelowy listy. Opcjonalny, potrzebny gdy ten sam list_id jest użyty dla kilku adresów.
+      required: false
+      example: "192.168.17.45"
+      selector:
+        text:
