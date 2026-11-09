@@ -4,56 +4,12 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
-from .entity import NetVarEntity
-
+from .codec import to_bool
+from .entity import NetVarEntity, add_platform_entities
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _to_bool(value):
-    """Konwersja wartości na bool dla typu BOOL."""
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, (int, float)):
-        if value == 0:
-            return False
-        if value == 1:
-            return True
-
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-
-        if normalized in ("true", "on", "1"):
-            return True
-
-        if normalized in ("false", "off", "0"):
-            return False
-
-    raise ValueError(f"Nieprawidłowa wartość BOOL: {value}")
-
-
-def _get_yaml_entities(hass):
-    """Tworzenie encji switch z konfiguracji YAML."""
-    entities = []
-
-    devices = hass.data.get(DOMAIN, {}).get("devices", {})
-
-    for device in devices.values():
-        if device.get("source") != "yaml":
-            continue
-
-        coordinator = device["coordinator"]
-
-        for variable in coordinator.variables:
-            if variable["entity"] == "switch":
-                entities.append(
-                    NetVarSwitch(coordinator, variable)
-                )
-
-    return entities
 
 
 async def async_setup_platform(
@@ -63,81 +19,59 @@ async def async_setup_platform(
     discovery_info=None,
 ):
     """Konfiguracja platformy switch z YAML."""
-    async_add_entities(_get_yaml_entities(hass))
+    add_platform_entities(hass, async_add_entities, "switch", NetVarSwitch)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry,
-    async_add_entities: AddEntitiesCallback,
-):
-    """Konfiguracja platformy switch z wpisu konfiguracyjnego."""
-    device = hass.data.get(DOMAIN, {}).get("devices", {}).get(
-        entry.entry_id
-    )
+class NetVarSwitch(NetVarEntity, SwitchEntity, RestoreEntity):
+    """Przełącznik NetVar (stan optymistyczny: PLC nie potwierdza zapisu).
 
-    if not device:
-        return
+    restore_value: po restarcie przywracany jest ostatni stan i wysyłany do PLC.
+    """
 
-    coordinator = device["coordinator"]
-
-    entities = [
-        NetVarSwitch(coordinator, variable)
-        for variable in coordinator.variables
-        if variable["entity"] == "switch"
-    ]
-
-    async_add_entities(entities)
-
-
-class NetVarSwitch(NetVarEntity, SwitchEntity):
-    """Przełącznik NetVar."""
+    _attr_assumed_state = True
 
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
         self._attr_device_class = variable.get("device_class")
-        self._attr_is_on = _to_bool(
-            variable.get("initial_value", False)
-        )
+        self._attr_is_on = to_bool(variable.get("initial_value", False))
 
-    def _update_value(self, value):
-        self._attr_is_on = _to_bool(value)
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+
+        if not self.variable.get("restore_value"):
+            return
+
+        last = await self.async_get_last_state()
+
+        if last is None or last.state not in ("on", "off"):
+            return
+
+        state = last.state == "on"
+
+        self.coordinator.set_variable(self.variable, state, restore=True)
+        self._attr_is_on = state
+        self.coordinator.schedule_startup_send()
+
+    async def _async_set(self, state):
+        try:
+            self.coordinator.set_variable(self.variable, state)
+        except (ValueError, OSError) as err:
+            _LOGGER.error(
+                "Nie można ustawić %s na %s: %s",
+                self.variable["name"],
+                state,
+                err,
+            )
+            raise HomeAssistantError(
+                f"Nie można wysłać wartości do PLC: {err}"
+            ) from err
+
+        self._attr_is_on = state
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):
-        try:
-            self.coordinator.set_variable(
-                self.variable,
-                True,
-            )
-        except (ValueError, OSError) as err:
-            _LOGGER.error(
-                "Nie można włączyć %s: %s",
-                self.variable["name"],
-                err,
-            )
-            raise HomeAssistantError(
-                f"Nie można wysłać wartości do PLC: {err}"
-            ) from err
-
-        self._attr_is_on = True
-        self.async_write_ha_state()
+        await self._async_set(True)
 
     async def async_turn_off(self, **kwargs):
-        try:
-            self.coordinator.set_variable(
-                self.variable,
-                False,
-            )
-        except (ValueError, OSError) as err:
-            _LOGGER.error(
-                "Nie można wyłączyć %s: %s",
-                self.variable["name"],
-                err,
-            )
-            raise HomeAssistantError(
-                f"Nie można wysłać wartości do PLC: {err}"
-            ) from err
-
-        self._attr_is_on = False
-        self.async_write_ha_state()
+        await self._async_set(False)
