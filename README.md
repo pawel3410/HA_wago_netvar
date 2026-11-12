@@ -18,10 +18,12 @@ Wymagana wersja Home Assistant: **2024.11 lub nowsza**.
 - Konfiguracja wyłącznie ręczna, tekstowa (YAML w `configuration.yaml`) ze ścisłą walidacją: literówki w nazwach pól są błędem. Integracja nie ma kreatora w interfejsie (config flow).
 - Kodowanie little-endian.
 - Aktualizacja encji po każdej poprawnej ramce UDP.
-- Automatyczne sensory diagnostyczne: `rx_packets`, `tx_packets`, `rx_errors`, `tx_errors`, `rejected_packets`.
+- Automatyczne sensory diagnostyczne: `rx_packets_<list_id>`, `rx_errors_<list_id>`, `rejected_packets_<list_id>` dla list `read`, `tx_packets_<list_id>`, `tx_errors_<list_id>` dla list `write` oraz sumy wszystkich list (`total_rx_packets` itd.).
+- Konfiguracja (nazwy parametrów i domyślne wartości) jest taka sama jak w komponencie ESPHome: tę samą listę można opisać w obu platformach niemal identycznie.
+- Wysyłka przy zmianie wysyła tylko zmienioną zmienną (lista niepakowana), z osobnym `min_interval` i `sequence` dla każdej zmiennej.
 - Usługa `wago_netvar.send_list` wymuszająca natychmiastową wysyłkę listy `write`.
-- Numer `sequence` (bajty 16-17) jest odczytywany i logowany, ale nie jest uwzględniany w logice integracji.
-- Suma kontrolna (bajty 18-19) jest odczytywana, ale nie jest weryfikowana; przy wysyłce zawsze `00 00`.
+- Numer `sequence` (bajty 16-17) jest przy odbiorze odczytywany i logowany, ale nie jest uwzględniany w logice; przy wysyłce rośnie osobno dla listy (pakowana) albo dla każdej zmiennej (niepakowana).
+- Flagi (bajt 18) i suma kontrolna (bajt 19) są odczytywane, ale nie weryfikowane; przy wysyłce zawsze `00 00`. Ramki z typem wiadomości (bajty 4-7) różnym od `0` są odrzucane.
 
 ## Obsługiwane typy
 
@@ -191,8 +193,8 @@ wago_netvar:
 | pack_variables | `true` | `true` - cały bufor w jednej ramce; `false` - osobna ramka dla zmiennej. |
 | var_count | liczba zmiennych | Tylko listy pakowane. Liczba zmiennych w liście PLC. Przy odczycie musi się zgadzać z polem `var_count` ramki, przy wysyłce jest wpisywana do nagłówka. Nie może być mniejsza od liczby skonfigurowanych zmiennych. |
 | payload_size | z offsetów | Tylko listy pakowane. Rozmiar danych listy w bajtach. Domyślnie wynika z najdalszej zmiennej; przy odczycie ramka może wtedy mieć dłuższy ładunek. Po podaniu `payload_size` ładunek odbieranej ramki musi mieć dokładnie taki rozmiar, a wysyłany bufor ma taki rozmiar. |
-| on_change | `false` | Wysyłaj przy zmianie wartości (tylko tryb write). |
-| min_interval | 500 | Minimalny odstęp między wysyłkami przy `on_change`. Liczba oznacza milisekundy; można podać też tekst z jednostką: `"500ms"`, `"1s"`, `"2min"`, `"1h"`. |
+| on_change | `false` | Wysyłaj przy zmianie wartości (tylko tryb write). Alias: `send_on_change`. Patrz „Wysyłanie z Home Assistant”. |
+| min_interval | 500 | Minimalny odstęp między wysyłkami przy `on_change` (osobno dla każdej ramki: listy albo zmiennej). Liczba oznacza milisekundy; można podać też tekst z jednostką: `"500ms"`, `"1s"`, `"2min"`, `"1h"`. |
 | update_interval | 5 | Cykliczny interwał wysyłania całej listy. Liczba oznacza sekundy; można podać też tekst z jednostką (`"500ms"`, `"5s"`, `"2min"`). `0`, `"0s"` albo `never` = wyłączone. |
 | timeout | 0 | Tylko tryb read. Po tym czasie bez ramki encje stają się niedostępne (liczba = sekundy, albo tekst z jednostką jak wyżej). `0` = wyłączone. W liście niepakowanej liczony osobno dla każdej zmiennej. |
 | require_values | `false` | Tylko tryb write, lista **pakowana**: nie wysyłaj listy, dopóki każda zmienna nie ma wartości (patrz „Wartości początkowe i przywracanie”). W liście niepakowanej użycie `require_values` jest błędem: służy do tego `require_value` przy zmiennych. |
@@ -210,7 +212,7 @@ Parametry niedotyczące danego trybu (np. `timeout` w liście write, `var_count`
 | offset | wszystkie | Pozycja w buforze w bajtach. Wymagany w liście pakowanej, w niepakowanej opcjonalny (domyślnie bezpośrednio za poprzednimi zmiennymi). Alias: `byte_offset` (nazwa używana w ESPHome). |
 | index | lista niepakowana | Numer zmiennej w liście PLC. Domyślnie najmniejszy wolny numer (bez jawnych `index` jest to pozycja na liście YAML). W listach pakowanych ignorowany. |
 | length | `STRING` | Długość tekstu w znakach (1..255), domyślnie 80. |
-| format | `sensor` typu TIME, DATE, TOD, DT | `text` (domyślnie): tekst IEC, `raw`: surowa liczba. Przy `text` nie wolno podawać `device_class`, `state_class`, `unit_of_measurement` ani `suggested_display_precision`. |
+| format | `sensor` typu TIME, DATE, TOD, DT | `text` (domyślnie): tekst IEC, `raw`: surowa liczba. Przy `text` nie wolno podawać `device_class`, `state_class`, `unit_of_measurement`, `suggested_display_precision` ani `suggested_unit_of_measurement`. |
 | initial_value | lista write | Początkowa wartość bufora i encji. Podanie go jawnie oznacza też, że zmienna „ma wartość” od startu (patrz „Wartości początkowe i przywracanie”). |
 | restore_value | `switch`, `number` | `true`: po restarcie Home Assistant przywracany jest ostatni stan encji i wysyłany do PLC. Domyślnie `false`. |
 | require_value | lista write niepakowana | `true`: ramka tej zmiennej nie jest wysyłana, dopóki zmienna nie ma wartości. W liście pakowanej jest błędem (użyj `require_values` listy). |
@@ -226,6 +228,9 @@ Parametry niedotyczące danego trybu (np. `timeout` w liście write, `var_count`
 | entity_category | wszystkie | `config` albo `diagnostic`. |
 | enabled_by_default | wszystkie | Czy encja jest domyślnie włączona (domyślnie `true`). |
 | force_update | wszystkie | Wymuszanie zapisu stanu także bez zmiany wartości (domyślnie `false`). |
+| visible_by_default | wszystkie | Czy encja jest domyślnie widoczna w rejestrze encji (domyślnie `true`). |
+| suggested_unit_of_measurement | `sensor` | Sugerowana jednostka wyświetlania (Home Assistant przelicza wartość z `unit_of_measurement`, np. °C na °F). |
+| inverted | `binary_sensor`, `switch` | Odwraca wartość BOOL: dla `binary_sensor` PLC FALSE oznacza stan włączony, dla `switch` do PLC trafia negacja stanu (dotyczy też `initial_value` i `restore_value`, które opisują stan encji). |
 
 Reguły doboru encji: `BOOL` używa `binary_sensor` lub `switch`, `STRING` używa `sensor` (lista `read`) albo `number` (lista `write`), pozostałe typy `sensor` lub `number`. Lista `read` zawiera `sensor` i `binary_sensor`, a lista `write` `switch` i `number`.
 
@@ -257,19 +262,18 @@ Wartość, której nie da się zdekodować (np. REAL będący NaN lub nieskończ
 
 ### Numer sequence
 
-Pole `sequence` (bajty 16-17) jest 16-bitowym numerem cyklu listy. Integracja go odczytuje i zapisuje w logach debug, ale **nie używa go do wykrywania cykli ani resetowania diagnostyki**. Każda poprawna ramka jest dekodowana natychmiast.
+Pole `sequence` (bajty 16-17) jest 16-bitowym licznikiem ramek. **Odbiór:** integracja go odczytuje i zapisuje w logach debug, ale nie używa go do wykrywania cykli ani resetowania diagnostyki; każda poprawna ramka jest dekodowana natychmiast. **Wysyłka:** licznik startuje od 1 i rośnie przy każdej wysłanej ramce. Lista pakowana ma jeden licznik na listę, a lista niepakowana osobny licznik dla każdej zmiennej.
 
 ## Automatyczne sensory diagnostyczne
 
-Dla każdej listy integracja tworzy sensory diagnostyczne (liczniki rosnące od uruchomienia Home Assistant, odświeżane najwyżej raz na sekundę):
+Sensory diagnostyczne (liczniki rosnące od uruchomienia Home Assistant, odświeżane najwyżej raz na sekundę) tworzone są automatycznie, a ich nazwy zawierają `list_id`:
 
-- `rx_packets` - liczba ramek, które przeszły walidację (także ramki zmiennych pominiętych w konfiguracji listy niepakowanej).
-- `tx_packets` - liczba wysłanych ramek.
-- `rx_errors` - błędy gniazda przy odbiorze oraz błędy dekodowania wartości.
-- `tx_errors` - liczba nieudanych wysyłek.
-- `rejected_packets` - liczba ramek, które nie przeszły walidacji listy (reguły w sekcji „Walidacja ramki”).
+| Lista | Sensory |
+|-------|---------|
+| `read` | `rx_packets_<list_id>` - ramki, które przeszły walidację (także ramki zmiennych pominiętych w liście niepakowanej); `rx_errors_<list_id>` - błędy gniazda przy odbiorze oraz błędy dekodowania wartości; `rejected_packets_<list_id>` - ramki, które nie przeszły walidacji listy (reguły w sekcji „Walidacja ramki”) |
+| `write` | `tx_packets_<list_id>` - wysłane ramki (w liście niepakowanej każda zmienna to osobna ramka); `tx_errors_<list_id>` - nieudane wysyłki |
 
-Nazwa sensora ma postać `NetVar List <list_id> (<ip>, <tryb>) <licznik>`, np. `sensor.netvar_list_123_192_168_17_45_read_rx_packets`. Rzeczywiste identyfikatory encji zależą od nazw nadanych przez Home Assistant.
+Dodatkowo powstaje jeden zestaw sum po wszystkich listach: `total_rx_packets`, `total_rx_errors`, `total_rejected_packets`, `total_tx_packets`, `total_tx_errors`. Identyfikatory encji nadaje Home Assistant na podstawie nazw (np. `sensor.rx_packets_124`); przy dwóch listach tego samego kierunku o tym samym `list_id` Home Assistant dopisze do drugiej nazwy numer.
 
 Encje z YAML nie tworzą urządzenia (ograniczenie Home Assistant dla encji bez wpisu konfiguracyjnego).
 
@@ -280,13 +284,14 @@ Nagłówek ma 20 bajtów. Każdy datagram UDP zawiera dokładnie jedną ramkę.
 | Offset | Rozmiar | Znaczenie |
 |---:|---:|---|
 | 0 | 4 bajty | Sygnatura `00 2D 53 33` |
-| 4 | 4 bajty | Pole zarezerwowane |
+| 4 | 4 bajty | Typ wiadomości (w dokumentacji 3S pole „ID”; nie mylić z list_ID): `0` = dane zmiennych sieciowych. Inne wartości oznaczają potwierdzenia, prośby bootup i wymianę parametrów (SDO). Przy odbiorze ramki z wartością różną od `0` są odrzucane, przy wysyłce `0` |
 | 8 | 2 bajty | List ID |
 | 10 | 2 bajty | Index zmiennej w trybie niepakowanym (w pakowanym `0`) |
 | 12 | 2 bajty | Liczba zmiennych (`var_count`; w niepakowanym `1`) |
 | 14 | 2 bajty | Długość całej ramki (`frame_size`) |
 | 16 | 2 bajty | Numer sequence / cyklu |
-| 18 | 2 bajty | Flagi i suma kontrolna. W obserwowanych ramkach bajt 18 = `00` (bez sumy kontrolnej) lub `02` (z sumą). Algorytm nieznany; odbiór ignoruje to pole, wysyłka zawsze `00 00` |
+| 18 | 1 bajt | Flagi (bit 0: żądanie potwierdzenia, bit 1: żądanie sprawdzenia sumy, bit 2: błędna suma). W obserwowanych ramkach `00` lub `02`; odbiór ignoruje to pole, wysyłka zawsze `00` |
+| 19 | 1 bajt | Suma kontrolna (algorytm nieznany); odbiór ignoruje to pole, wysyłka zawsze `00` |
 | 20 | zmienna | Dane zmiennej lub bufor listy |
 
 Wszystkie wielobajtowe pola nagłówka są zapisane little-endian.
@@ -297,6 +302,7 @@ Ramka jest walidowana po:
 
 - IP nadawcy (jeśli w konfiguracji różne od `0.0.0.0`),
 - porcie docelowym (lista nasłuchuje na swoim porcie),
+- typie wiadomości (bajty 4-7), który musi wynosić `0` (dane zmiennych); potwierdzenia, prośby bootup i SDO są odrzucane,
 - `list_ID` (bajty 8-9),
 - rozmiarze całej ramki `frame_size` (bajty 14-15) względem rzeczywistej długości datagramu,
 - `var_count` (bajty 12-13): w liście pakowanej względem `var_count` listy, w niepakowanej musi wynosić 1,
@@ -305,7 +311,7 @@ Ramka jest walidowana po:
 Wszystkie listy `read` na jednym porcie korzystają z jednego gniazda. Każdy datagram jest przekazywany do list o zgodnym `list_id`, a ramka jest dekodowana przez każdą listę, która przejdzie pełną walidację (także kilka list o tym samym `list_id`, ale różnych adresach nadawcy). Zliczanie `rejected_packets` jest takie samo jak w wersji ESPHome:
 
 - ramka niemożliwa do zidentyfikowania (za krótka, błędne magic bytes) albo o `list_id`, którego nie obsługuje żadna lista `read` tego portu, jest zliczana na **wszystkich** listach `read` tego portu (powód trafia tylko do logu debug),
-- ramka o `list_id` obsługiwanym przez listy tego portu, której żadna z nich nie przyjęła (zły adres nadawcy, `var_count`, `frame_size`, rozmiar ładunku), jest zliczana tylko na listach o tym `list_id` (ostrzeżenie w logu, najwyżej raz na minutę).
+- ramka o `list_id` obsługiwanym przez listy tego portu, której żadna z nich nie przyjęła (zły adres nadawcy, typ wiadomości różny od `0`, `var_count`, `frame_size`, rozmiar ładunku), jest zliczana tylko na listach o tym `list_id` (ostrzeżenie w logu, najwyżej raz na minutę).
 
 Uwaga: jeżeli sterownik wysyła na ten sam port wiele list, a Home Assistant odczytuje tylko jedną, licznik `rejected_packets` będzie rósł przy każdej ramce pozostałych list. To zamierzone: ramka o innym `list_id` nie przechodzi walidacji listy.
 
@@ -318,17 +324,21 @@ Algorytm sumy kontrolnej nie jest znany. Integracja nie oblicza ani nie weryfiku
 
 ## Wysyłanie z Home Assistant (tryb write)
 
-Wysyłanie może być wyzwalane na trzy sposoby:
+Lista `write` jest wysyłana w trzech trybach, które działają niezależnie od siebie i można je łączyć:
 
-1. **Przy zmianie (`on_change`)** - gdy wartość encji zmieni się w Home Assistant, lista jest wysyłana po upływie `min_interval` od ostatniej wysyłki. Wysyłana jest cała lista (w trybie niepakowanym każda zmienna w osobnej ramce).
-2. **Cyklicznie (`update_interval`)** - co `update_interval` sekund cała lista jest wysyłana niezależnie od zmian, równolegle z `on_change`. Wartość `0` wyłącza wysyłanie cykliczne.
-3. **Na żądanie** - usługa `wago_netvar.send_list` (pola: `list_id`, opcjonalnie `ip_address`) wysyła listę natychmiast.
+1. **Przy zmianie (`on_change`)**, 2. **cyklicznie (`update_interval`)**, 3. **na żądanie** - usługa `wago_netvar.send_list` (pola: `list_id`, opcjonalnie `ip_address`) wysyła listę natychmiast (w liście niepakowanej wszystkie zmienne), z zachowaniem blokad `require_value(s)`.
 
-Gdy `on_change` jest wyłączone, a `update_interval` wynosi `0`, lista nie jest wysyłana wcale (poza usługą `send_list`).
+| Ustawienie | Zachowanie |
+|------------|------------|
+| tylko `on_change: true` (`update_interval: 0`) | Ramka jest wysyłana po zmianie wartości. Pierwsza wysyłka nie jest ograniczona; kolejna nie wcześniej niż `min_interval` po poprzedniej. Zmiana w trakcie odstępu jest wysyłana dopiero po jego upływie, a kilka zmian w tym czasie trafia do jednej ramki (ostatnie wartości). Ustawienie tej samej wartości nie jest zmianą i niczego nie wysyła. `min_interval: 0` wysyła każdą zmianę natychmiast. |
+| tylko `update_interval` (`on_change: false`) | Co `update_interval` wysyłana jest cała lista (w liście niepakowanej: wszystkie zmienne), niezależnie od zmian. Zmiany same niczego nie wysyłają. |
+| oba | Cykliczna wysyłka niesie aktualne wartości, czyli także niewysłane zmiany, i anuluje ich oczekiwanie. Każda wysyłka (także cykliczna) liczy się jako „poprzednia” dla `min_interval`, więc zmiana tuż po wysyłce cyklicznej czeka do upływu `min_interval`. |
 
-W trybie pakowanym wysyłany jest cały bufor (`payload_size` bajtów, nagłówek z `var_count`). W trybie niepakowanym każda zmienna jest wysyłana w osobnej ramce z numerem `index`. Bajty bufora nieobjęte żadną zmienną mają wartość `00`.
+**Lista pakowana:** zmiana dowolnej zmiennej powoduje wysłanie całej listy (jedna ramka, `payload_size` bajtów, nagłówek z `var_count`); `min_interval` i `sequence` dotyczą listy.
 
-Encje `switch` i `number` pokazują stan optymistyczny (`assumed_state`): PLC nie potwierdza zapisu.
+**Lista niepakowana:** po zmianie wysyłana jest **tylko ta zmienna, która zmieniła wartość** (własna ramka z numerem `index`), a `min_interval` jest liczony osobno dla każdej zmiennej (zmiany różnych zmiennych nie opóźniają się wzajemnie). Każda zmienna ma własny `sequence`.
+
+Bajty bufora nieobjęte żadną zmienną mają wartość `00`. Nieudana wysyłka jest ponawiana najwyżej raz na `min_interval` (co najmniej raz na sekundę) i liczona w `tx_errors`. Encje `switch` i `number` pokazują stan optymistyczny (`assumed_state`): PLC nie potwierdza zapisu.
 
 ### Konwersja wartości przy zapisie
 
@@ -387,27 +397,19 @@ Wysyłka na `255.255.255.255` wymaga, aby Home Assistant miał dostęp do sieci 
 
 ## Różnice względem integracji ESPHome
 
-Obie implementacje stosują te same reguły ramki, walidacji (w tym zliczania `rejected_packets`) i konwersji wartości. Różnice wynikają z platform:
+Konfiguracja listy i zmiennych (nazwy, domyślne wartości, reguły) jest taka sama w obu platformach, a ramki, walidacja (w tym `rejected_packets`), konwersje wartości, `on_change`/`min_interval`/`update_interval`, restore i blokady wysyłki działają tak samo. Pozostałe różnice wynikają z platform:
 
 | Obszar | Home Assistant | ESPHome |
 |--------|----------------|---------|
-| Konfiguracja | ręczny YAML w `configuration.yaml` | YAML ESPHome, zmienne i encje w jednym bloku |
-| Kierunek listy | `mode: read/write` (alias `direction`) | `direction: read/write` (alias `mode`) |
-| Wysyłka przy zmianie | `on_change: true/false` | `on_change: true/false` |
-| Offset zmiennej | `offset` (alias `byte_offset`) | `byte_offset` (alias `offset`) |
-| Jednostki czasu | liczba (ms / s) albo tekst z jednostką: `"500ms"`, `"5s"`, `"2min"`, `"never"` | tekst z jednostką: `"500ms"`, `"5s"` |
-| Typ encji | pole `entity` przy każdej zmiennej | `sensors`, `binary_sensors`, `text_sensors`, `switches`, `numbers` |
-| STRING | odczyt: `sensor`, zapis: `number` | odczyt: `text_sensor`, zapis: `number` |
-| Typy czasowe jako tekst IEC | `sensor` z `format: text` (domyślnie) albo `format: raw` | `text_sensor` (surowa liczba: `sensor`) |
-| Listy niepakowane (`pack_variables: false`) | obsługiwane | obsługiwane |
-| `payload_size`, `timeout`, `require_values`, `require_value`, `initial_value`, `restore_value` | obsługiwane | obsługiwane |
+| Identyfikator listy | brak | opcjonalne `id` (do lambd i akcji) |
+| Dodatkowe parametry encji | `visible_by_default`, `suggested_unit_of_measurement` | cały schemat encji ESPHome (`filters`, `on_value`, `internal`, `web_server`, ...) |
 | Wysyłka na żądanie | usługa `wago_netvar.send_list` | akcja `wago_netvar.send` lub `send_now()` |
-| Przywracanie stanu | `RestoreEntity` Home Assistant (`restore_value`) | pamięć nieulotna ESPHome (`restore_value`) |
-| Port lokalny listy `write` | port przydzielony przez system (osobne gniazdo wysyłające) | port przydzielony przez system |
-| Własny broadcast na ten sam port | rozpoznawany i pomijany przez listy `read` | nie dotyczy (inne urządzenie) |
+| Przywracanie stanu | `RestoreEntity` Home Assistant | pamięć nieulotna ESPHome (klucz: `unique_id`) |
 | Precyzja liczb 32-bitowych | dokładna (liczby całkowite Pythona) | `float` (do 16 777 216 dokładnie) |
 | REAL będący NaN/Inf przy odbiorze | ramka przyjęta, stan encji bez zmian, `rx_errors` +1 | stan „unknown” (NaN) |
-| Unikalność encji | `unique_id` z nazwy albo ręczny | nazwy encji ESPHome |
+| Własny broadcast na ten sam port | rozpoznawany i pomijany przez listy `read` | nie dotyczy (inne urządzenie) |
+| Walidacja konfiguracji | błędna lista jest pomijana, reszta działa | błąd odrzuca całą konfigurację (kompilacja) |
+| Stan po `timeout` | `unavailable` | `unknown` (`binary_sensor`/`text_sensor`: o ile wersja ESPHome ma `invalidate_state()`) |
 
 ## Zmiany w wersji 1.3.0 (łącznie ze zmianami 1.2.0)
 
@@ -425,6 +427,19 @@ Obie implementacje stosują te same reguły ramki, walidacji (w tym zliczania `r
 - Zliczanie `rejected_packets` zgodne z wersją ESPHome (ramki o nieobsługiwanym `list_id`, z niewłaściwego adresu nadawcy lub niezidentyfikowane są teraz zliczane, wcześniej były ignorowane). Ramka jest dekodowana przez każdą pasującą listę, a nie tylko jedną.
 - Lista `read` z `ip_address: 255.255.255.255` jest błędem (adres nadawcy).
 - Usunięto wycofaną opcję `transmit_checksum` (jej użycie jest teraz błędem „nieznane pole”).
+
+## Zmiany w wersji 1.5.0
+
+- Ramki z typem wiadomości (bajty 4-7, w dokumentacji 3S pole „ID”) różnym od `0` (potwierdzenia, prośby bootup, SDO) są odrzucane i zwiększają `rejected_packets`. Prośby bootup rozsyłane przez sterownik po restarcie będą więc widoczne w tym liczniku.
+- Opis bajtów 18 (flagi) i 19 (suma kontrolna) rozdzielono zgodnie z dokumentacją protokołu.
+
+## Zmiany w wersji 1.4.0
+
+- **Konfiguracja ujednolicona z komponentem ESPHome:** te same nazwy parametrów i domyślne wartości. Nowe aliasy: `send_on_change` (= `on_change`). Dotychczasowe nazwy nadal działają.
+- **Wysyłka przy zmianie:** tylko zmieniona zmienna w liście niepakowanej; `min_interval` liczony osobno dla każdej zmiennej; ustawienie tej samej wartości nie wywołuje wysyłki (wcześniej `set_variable` zawsze planował wysyłkę). Sprawdzono kombinacje `on_change`, `min_interval` i `update_interval` osobno i razem.
+- **`sequence` przy wysyłce:** osobny licznik dla każdej zmiennej (lista niepakowana) albo jeden na listę (pakowana); startuje od 1.
+- **Sensory diagnostyczne:** `rx_packets_<list_id>`, `rx_errors_<list_id>`, `rejected_packets_<list_id>` tylko dla list `read`, `tx_packets_<list_id>`, `tx_errors_<list_id>` tylko dla list `write`, oraz sumy `total_*`. Zmieniły się nazwy encji diagnostycznych (identyfikatory `unique_id` pozostały).
+- Nowe parametry zmiennej: `visible_by_default`, `suggested_unit_of_measurement`, `inverted`.
 
 ## Ograniczenia
 
