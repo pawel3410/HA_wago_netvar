@@ -75,13 +75,21 @@ WRITE_ENTITIES = ("switch", "number")
 
 ENTITY_CATEGORIES = ("config", "diagnostic")
 
-DIAGNOSTIC_SENSORS = (
-    "rx_packets",
-    "tx_packets",
-    "rx_errors",
-    "tx_errors",
-    "rejected_packets",
-)
+# Liczniki diagnostyczne tworzone automatycznie dla każdej listy: lista read ma liczniki odbioru,
+# lista write liczniki wysyłki. Nazwa sensora to <licznik>_<list_id>, np. rx_packets_124.
+DIAGNOSTIC_SENSORS = {
+    "read": ("rx_packets", "rx_errors", "rejected_packets"),
+    "write": ("tx_packets", "tx_errors"),
+}
+
+# Sumy liczników wszystkich list: nazwa sensora -> licznik koordynatora.
+TOTAL_SENSORS = {
+    "total_rx_packets": "rx_packets",
+    "total_rx_errors": "rx_errors",
+    "total_rejected_packets": "rejected_packets",
+    "total_tx_packets": "tx_packets",
+    "total_tx_errors": "tx_errors",
+}
 
 SERVICE_SEND_LIST = "send_list"
 
