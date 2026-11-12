@@ -27,4 +27,5 @@ class NetVarBinarySensor(NetVarEntity, BinarySensorEntity):
         self._attr_is_on = None
 
     def _update_value(self, value):
-        self._attr_is_on = bool(value)
+        # inverted: PLC FALSE oznacza stan włączony encji
+        self._attr_is_on = bool(value) != bool(self.variable.get("inverted"))
