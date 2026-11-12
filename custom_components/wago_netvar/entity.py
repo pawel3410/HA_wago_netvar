@@ -66,6 +66,9 @@ class NetVarEntity(Entity):
         self._attr_entity_registry_enabled_default = variable.get(
             "enabled_by_default", True
         )
+        self._attr_entity_registry_visible_default = variable.get(
+            "visible_by_default", True
+        )
 
         if variable.get("entity_category"):
             self._attr_entity_category = EntityCategory(
