@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/pawel3410/HA_wago_netvar/issues",
   "loggers": ["custom_components.wago_netvar"],
   "requirements": [],
-  "version": "1.3.0"
+  "version": "1.5.0"
 }
