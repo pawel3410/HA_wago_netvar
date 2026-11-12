@@ -53,6 +53,7 @@ from .codec import (
     normalize_type,
     number_to_text,
     string_length,
+    to_bool,
     type_range,
     variable_size,
 )
@@ -61,6 +62,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Opóźnienie (s) jednorazowej wysyłki po przywróceniu stanu encji po restarcie.
 STARTUP_SEND_DELAY = 1.0
+
+# Klucz "jednostki wysyłki" listy pakowanej (cała lista = jedna ramka). W liście niepakowanej
+# jednostką jest pozycja zmiennej.
+LIST_KEY = -1
 
 # Dozwolone wartości device_class dla poszczególnych rodzajów encji.
 DEVICE_CLASSES = {
@@ -79,6 +84,7 @@ DEVICE_KEYS = frozenset(
         "list_id",
         "mode",
         "direction",  # alias mode (nazwa używana w ESPHome)
+        "send_on_change",  # alias on_change
         "pack_variables",
         "var_count",
         "payload_size",
@@ -118,6 +124,9 @@ VARIABLE_KEYS = frozenset(
         "enabled_by_default",
         "force_update",
         "zero_as_unavailable",
+        "visible_by_default",
+        "suggested_unit_of_measurement",
+        "inverted",
     }
 )
 
@@ -131,6 +140,7 @@ ENTITY_ONLY_KEYS = {
     "suggested_display_precision": "sensor",
     "zero_as_unavailable": "sensor",
     "format": "sensor",
+    "suggested_unit_of_measurement": "sensor",
 }
 
 
@@ -374,7 +384,7 @@ def validate_variable(variable, mode=MODE_WRITE):
     if result["type"] == STRING_TYPE or textual:
         forbidden = (
             ("device_class", "state_class", "unit_of_measurement",
-             "suggested_display_precision")
+             "suggested_display_precision", "suggested_unit_of_measurement")
             if textual
             else ("device_class",)
         )
@@ -407,8 +417,15 @@ def validate_variable(variable, mode=MODE_WRITE):
         "zero_as_unavailable",
         "restore_value",
         "require_value",
+        "visible_by_default",
+        "inverted",
     ):
         _as_bool(result, key)
+
+    if result.get("inverted") and entity not in ("binary_sensor", "switch"):
+        raise vol.Invalid(
+            f"inverted (zmienna {name}) dotyczy tylko encji binary_sensor i switch"
+        )
 
     if result.get("restore_value") and entity not in ("switch", "number"):
         raise vol.Invalid(
@@ -544,6 +561,13 @@ def validate_device(device):
             raise vol.Invalid("Użyj tylko mode (direction to jego alias)")
 
         result["mode"] = result.pop("direction")
+
+    # send_on_change to alias on_change (nazwa używana w opisie założeń projektu).
+    if "send_on_change" in result:
+        if "on_change" in result:
+            raise vol.Invalid("Użyj tylko on_change (send_on_change to jego alias)")
+
+        result["on_change"] = result.pop("send_on_change")
 
     try:
         address = ipaddress.ip_address(str(result["ip_address"]).strip())
@@ -1098,7 +1122,8 @@ class NetVarCoordinator:
 
         self.listeners = []
         self.diagnostic_listeners = []
-        self.tx_sequence = 0
+        # sequence_counter (bajty 16-17): jeden na listę (pakowana) albo osobny dla każdej zmiennej (niepakowana)
+        self.sequences = {}
 
         self.rx_packets = 0
         self.tx_packets = 0
@@ -1106,8 +1131,11 @@ class NetVarCoordinator:
         self.tx_errors = 0
         self.rejected_packets = 0
 
-        self.last_send_time = 0.0
-        self.send_timer = None
+        # Stan wysyłki on_change. Jednostka wysyłki to cała lista (pakowana) albo pojedyncza zmienna (niepakowana):
+        # każda ma własny czas ostatniej wysyłki (min_interval) i własny timer wysyłki zaległej.
+        self.dirty = set()  # pozycje zmiennych zmienionych od ostatniej wysyłki
+        self._last_sent = {}
+        self._timers = {}
         self.startup_timer = None
         self.periodic_task = None
         self.watchdog_task = None
@@ -1121,7 +1149,7 @@ class NetVarCoordinator:
         if self.mode == MODE_WRITE:
             for position, variable in enumerate(self.variables):
                 encoded = encode_value(
-                    variable["initial_value"],
+                    self._wire_value(variable, variable["initial_value"]),
                     variable["type"],
                     variable.get("length"),
                 )
@@ -1336,6 +1364,17 @@ class NetVarCoordinator:
                 (self.list_id, sender_ip, self.ip_address),
             )
 
+        # Typ wiadomości (bajty 4-7; w dokumentacji 3S pole "ID"): 0 = dane zmiennych sieciowych.
+        # Inne wartości to potwierdzenia, prośby bootup i wymiana parametrów (SDO).
+        message_type = int.from_bytes(data[4:8], "little")
+
+        if message_type != 0:
+            return (
+                "Lista %d: ramka o typie wiadomości %d (to nie dane zmiennych: "
+                "potwierdzenie, prośba bootup albo SDO)",
+                (self.list_id, message_type),
+            )
+
         total_length = int.from_bytes(data[14:16], "little")
 
         if total_length != len(data):
@@ -1392,8 +1431,19 @@ class NetVarCoordinator:
             if item is variable
         )
 
+    @staticmethod
+    def _wire_value(variable, value):
+        """Wartość BOOL zmiennej z inverted: do PLC trafia negacja wartości logicznej encji."""
+        if variable.get("inverted") and variable["type"] == "BOOL":
+            return not to_bool(value)
+
+        return value
+
     def set_variable(self, variable, value, restore=False):
-        """Ustawienie wartości zmiennej w buforze i zaplanowanie wysyłki.
+        """Ustawienie wartości zmiennej w buforze i zaplanowanie wysyłki przy zmianie.
+
+        Wysyłka on_change następuje tylko wtedy, gdy wartość się zmieniła (albo zmienna dostaje
+        pierwszą wartość). Lista pakowana wysyła wtedy całą listę, niepakowana tylko tę zmienną.
 
         restore=True: wartość przywrócona po restarcie. Trafia do bufora i oznacza
         zmienną jako mającą wartość, ale nie uruchamia wysyłki (patrz
@@ -1402,6 +1452,7 @@ class NetVarCoordinator:
         if self.mode != MODE_WRITE:
             raise ValueError("Nie można zapisać do listy tylko do odczytu")
 
+        value = self._wire_value(variable, value)
         encoded = encode_value(value, variable["type"], variable.get("length"))
         offset = variable["offset"]
 
@@ -1417,11 +1468,27 @@ class NetVarCoordinator:
                     variable["length"],
                 )
 
-        self.payload[offset:offset + len(encoded)] = encoded
-        self.has_value.add(self._position(variable))
+        position = self._position(variable)
+        changed = bytes(self.payload[offset:offset + len(encoded)]) != encoded
+        first_value = position not in self.has_value
 
-        if not restore:
-            self._schedule_send()
+        self.payload[offset:offset + len(encoded)] = encoded
+        self.has_value.add(position)
+
+        if restore or not self.on_change or not (changed or first_value):
+            return
+
+        self.dirty.add(position)
+        self._request_send(self._unit(position))
+
+    def _unit(self, position):
+        return LIST_KEY if self.pack_variables else position
+
+    def _units(self):
+        if self.pack_variables:
+            return [LIST_KEY]
+
+        return list(range(len(self.variables)))
 
     def schedule_startup_send(self):
         """Jednorazowa wysyłka po przywróceniu stanu encji (z krótkim opóźnieniem).
@@ -1442,37 +1509,57 @@ class NetVarCoordinator:
 
     def _startup_send(self):
         self.startup_timer = None
-        self._send_all()
+        self._send_everything()
 
-    def _schedule_send(self):
-        """Zaplanowanie wysyłki z uwzględnieniem min_interval."""
-        if not self.on_change:
-            return
+    def _request_send(self, unit):
+        """Wysyłka zmiany z uwzględnieniem min_interval danej jednostki (listy albo zmiennej).
 
-        if self.min_interval <= 0:
-            self._send_all()
-            return
+        Pierwsza wysyłka nie jest ograniczona. Zmiana przed upływem min_interval jest
+        wysyłana dopiero po jego upływie, a zmiany w tym czasie są scalane w jedną ramkę.
+        """
+        last = self._last_sent.get(unit)
+        wait = 0.0
 
-        elapsed = time.monotonic() - self.last_send_time
+        if last is not None:
+            wait = last + self.min_interval / 1000.0 - time.monotonic()
 
-        if elapsed >= self.min_interval / 1000.0:
-            self._send_all()
-        else:
-            if self.send_timer is not None:
-                self.send_timer.cancel()
-
-            delay = (self.min_interval / 1000.0) - elapsed
-            self.send_timer = asyncio.get_running_loop().call_later(
-                delay, self._send_all
+        if wait <= 0:
+            self._flush(unit)
+        elif unit not in self._timers:
+            self._timers[unit] = asyncio.get_running_loop().call_later(
+                wait, self._flush_timer, unit
             )
 
-    def send_now(self):
-        """Natychmiastowa wysyłka listy (usługa send_list)."""
-        if self.send_timer is not None:
-            self.send_timer.cancel()
-            self.send_timer = None
+    def _flush_timer(self, unit):
+        self._timers.pop(unit, None)
+        self._flush(unit)
 
-        self._send_all()
+    def _flush(self, unit):
+        """Wysyła jednostkę, jeśli ma niewysłane zmiany."""
+        if self.pack_variables:
+            pending = bool(self.dirty)
+        else:
+            pending = unit in self.dirty
+
+        if pending:
+            self._send_unit(unit)
+
+    def send_now(self):
+        """Natychmiastowa wysyłka całej listy (usługa send_list)."""
+        self._send_everything()
+
+    def _send_everything(self):
+        """Wysyłka cykliczna, na żądanie i startowa: cała lista albo wszystkie zmienne (niepakowana)."""
+        if self.mode != MODE_WRITE:
+            return
+
+        for timer in self._timers.values():
+            timer.cancel()
+
+        self._timers.clear()
+
+        for unit in self._units():
+            self._send_unit(unit)
 
     def _missing_names(self):
         """Nazwy zmiennych, które nie mają jeszcze wartości."""
@@ -1482,17 +1569,15 @@ class NetVarCoordinator:
             if position not in self.has_value
         ]
 
-    def _send_all(self):
-        """Wysłanie całej listy lub wszystkich zmiennych (tryb niepakowany).
+    def _send_unit(self, unit):
+        """Wysyła jedną jednostkę: całą listę (pakowana) albo jedną zmienną (niepakowana).
 
         require_values (lista pakowana): lista nie jest wysyłana, dopóki każda
-        zmienna nie dostała wartości. require_value (lista niepakowana): pomijane
-        są ramki zmiennych bez wartości.
+        zmienna nie dostała wartości. require_value (lista niepakowana): ramka
+        zmiennej bez wartości jest pomijana.
         """
         if self.mode != MODE_WRITE:
             return
-
-        self.send_timer = None
 
         if self.pack_variables:
             if self.require_values and len(self.has_value) < len(self.variables):
@@ -1504,32 +1589,43 @@ class NetVarCoordinator:
                 )
                 return
 
-            self._transmit(
-                self.build_packet(bytes(self.payload), 0, self.var_count)
+            ok = self._transmit(
+                self.build_packet(bytes(self.payload), 0, self.var_count, unit)
             )
+            positions = set(range(len(self.variables)))
         else:
-            for position, variable in enumerate(self.variables):
-                if variable.get("require_value") and position not in self.has_value:
-                    self.warn_throttled(
-                        ("require_value", position),
-                        "Lista %d: nie wysłano zmiennej %s (brak wartości)",
-                        self.list_id,
-                        variable["name"],
-                    )
-                    continue
+            variable = self.variables[unit]
 
-                offset = variable["offset"]
-                size = variable_size(variable)
-
-                self._transmit(
-                    self.build_packet(
-                        bytes(self.payload[offset:offset + size]),
-                        variable["index"],
-                        1,
-                    )
+            if variable.get("require_value") and unit not in self.has_value:
+                self.warn_throttled(
+                    ("require_value", unit),
+                    "Lista %d: nie wysłano zmiennej %s (brak wartości)",
+                    self.list_id,
+                    variable["name"],
                 )
+                return
 
-        self.last_send_time = time.monotonic()
+            offset = variable["offset"]
+            size = variable_size(variable)
+            ok = self._transmit(
+                self.build_packet(
+                    bytes(self.payload[offset:offset + size]),
+                    variable["index"],
+                    1,
+                    unit,
+                )
+            )
+            positions = {unit}
+
+        # Czas zapisujemy także przy błędzie: nieudana wysyłka jest ponawiana najwyżej raz na min_interval.
+        self._last_sent[unit] = time.monotonic()
+
+        if ok:
+            self.dirty -= positions
+        elif self.dirty & positions and unit not in self._timers:
+            self._timers[unit] = asyncio.get_running_loop().call_later(
+                max(self.min_interval / 1000.0, 1.0), self._flush_timer, unit
+            )
 
     def _transmit(self, packet):
         """Transmisja pakietu UDP i aktualizacja liczników."""
@@ -1541,7 +1637,7 @@ class NetVarCoordinator:
                 self.port,
                 self.list_id,
             )
-            return
+            return False
 
         self.count("tx_packets")
 
@@ -1554,13 +1650,15 @@ class NetVarCoordinator:
             packet[HEADER_SIZE:].hex(),
         )
 
+        return True
+
     async def _periodic_send(self):
         """Cykliczne wysyłanie listy co update_interval sekund."""
         while True:
             await asyncio.sleep(self.update_interval)
 
             try:
-                self._send_all()
+                self._send_everything()
             except Exception:
                 _LOGGER.exception(
                     "Błąd cyklicznej wysyłki listy %d", self.list_id
@@ -1576,9 +1674,10 @@ class NetVarCoordinator:
 
     async def async_stop(self):
         """Zatrzymanie timerów i zadań w tle."""
-        if self.send_timer is not None:
-            self.send_timer.cancel()
-            self.send_timer = None
+        for timer in self._timers.values():
+            timer.cancel()
+
+        self._timers.clear()
 
         if self.startup_timer is not None:
             self.startup_timer.cancel()
@@ -1595,7 +1694,7 @@ class NetVarCoordinator:
                 task.cancel()
                 setattr(self, attribute, None)
 
-    def build_packet(self, payload, variable_index, variable_count):
+    def build_packet(self, payload, variable_index, variable_count, unit=LIST_KEY):
         """Budowa ramki NetVar UDP z nagłówkiem i ładunkiem."""
         header = bytearray(HEADER_SIZE)
 
@@ -1604,14 +1703,15 @@ class NetVarCoordinator:
         header[10:12] = variable_index.to_bytes(2, "little")
         header[12:14] = variable_count.to_bytes(2, "little")
         header[14:16] = (HEADER_SIZE + len(payload)).to_bytes(2, "little")
-        header[16:18] = self.tx_sequence.to_bytes(2, "little")
+        sequence = self.sequences.get(unit, 1)
+        header[16:18] = sequence.to_bytes(2, "little")
 
         # Flagi i suma kontrolna (bajty 18-19) zawsze 00 00: algorytm sumy
         # kontrolnej jest nieznany, więc nie jest generowany. Lista odbiorcza
         # w PLC musi mieć wyłączone sprawdzanie sumy kontrolnej.
         header[18:20] = b"\x00\x00"
 
-        self.tx_sequence = (self.tx_sequence + 1) & 0xFFFF
+        self.sequences[unit] = (sequence + 1) & 0xFFFF
 
         return bytes(header) + payload
 
