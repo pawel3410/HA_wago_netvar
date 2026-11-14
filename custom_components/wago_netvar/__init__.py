@@ -127,6 +127,7 @@ VARIABLE_KEYS = frozenset(
         "visible_by_default",
         "suggested_unit_of_measurement",
         "inverted",
+        "source",
     }
 )
 
@@ -427,6 +428,23 @@ def validate_variable(variable, mode=MODE_WRITE):
             f"inverted (zmienna {name}) dotyczy tylko encji binary_sensor i switch"
         )
 
+    # source: encja Home Assistant, której stan jest wysyłany do PLC (sensor i binary_sensor listy write)
+    if "source" in result:
+        if entity not in ("sensor", "binary_sensor"):
+            raise vol.Invalid(
+                f"source (zmienna {name}) dotyczy tylko encji sensor i binary_sensor"
+            )
+
+        source = str(result["source"]).strip().lower()
+
+        if not re.fullmatch(r"[a-z0-9_]+\.[a-z0-9_]+", source):
+            raise vol.Invalid(
+                f"source (zmienna {name}) musi być identyfikatorem encji, "
+                "np. sensor.temperatura_kotla"
+            )
+
+        result["source"] = source
+
     if result.get("restore_value") and entity not in ("switch", "number"):
         raise vol.Invalid(
             f"restore_value (zmienna {name}) dotyczy tylko encji switch i number"
@@ -664,6 +682,28 @@ def validate_device(device):
                 f"Lista {mode} może zawierać tylko encje: {', '.join(allowed)} "
                 f"(zmienna {variable['name']})"
             )
+
+    for variable in result["variables"]:
+        if mode == MODE_READ:
+            # Encje listy read (także switch i number) tylko pokazują wartość z PLC.
+            for key in ("source", "require_value", "restore_value"):
+                if variable.get(key):
+                    raise vol.Invalid(
+                        f"{key} (zmienna {variable['name']}) dotyczy tylko "
+                        "zmiennych list write"
+                    )
+
+            if "initial_value" in variable:
+                raise vol.Invalid(
+                    f"initial_value (zmienna {variable['name']}) dotyczy tylko "
+                    "zmiennych list write"
+                )
+
+            if variable["type"] == STRING_TYPE and variable["entity"] != "sensor":
+                raise vol.Invalid(
+                    f"Zmienna STRING ({variable['name']}) w liście read musi "
+                    "używać encji sensor"
+                )
 
     for variable in result["variables"]:
         if packed and variable.get("require_value"):
@@ -1474,6 +1514,10 @@ class NetVarCoordinator:
 
         self.payload[offset:offset + len(encoded)] = encoded
         self.has_value.add(position)
+
+        # Encje sensor i binary_sensor listy write pokazują wysyłaną wartość.
+        if changed or first_value:
+            self.notify({position})
 
         if restore or not self.on_change or not (changed or first_value):
             return
