@@ -7,6 +7,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .codec import MODE_READ
 from .entity import NetVarEntity, add_platform_entities
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,15 +24,18 @@ async def async_setup_platform(
 
 
 class NetVarNumber(NetVarEntity, NumberEntity, RestoreEntity):
-    """Encja number NetVar (stan optymistyczny: PLC nie potwierdza zapisu).
+    """Encja number NetVar.
 
-    restore_value: po restarcie przywracana jest ostatnia wartość i wysyłana do PLC.
+    Lista write: steruje wysyłaną wartością (stan optymistyczny: PLC nie potwierdza zapisu);
+    restore_value przywraca po restarcie ostatnią wartość i wysyła ją do PLC.
+    Lista read: pokazuje wartość odebraną z PLC, ustawianie z interfejsu jest odrzucane.
     """
-
-    _attr_assumed_state = True
 
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
+
+        self._read_only = coordinator.mode == MODE_READ
+        self._attr_assumed_state = not self._read_only
 
         # min, max, step i mode są uzupełnione i zweryfikowane w konfiguracji.
         self._attr_native_min_value = variable["min"]
@@ -42,14 +46,19 @@ class NetVarNumber(NetVarEntity, NumberEntity, RestoreEntity):
             "unit_of_measurement"
         )
         self._attr_device_class = variable.get("device_class")
-        self._attr_native_value = float(
-            variable.get("initial_value", variable["min"])
+        self._attr_native_value = (
+            None
+            if self._read_only
+            else float(variable.get("initial_value", variable["min"]))
         )
+
+    def _update_value(self, value):
+        self._attr_native_value = float(value)
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
 
-        if not self.variable.get("restore_value"):
+        if self._read_only or not self.variable.get("restore_value"):
             return
 
         last = await self.async_get_last_state()
@@ -72,6 +81,12 @@ class NetVarNumber(NetVarEntity, NumberEntity, RestoreEntity):
         self.coordinator.schedule_startup_send()
 
     async def async_set_native_value(self, value):
+        if self._read_only:
+            raise HomeAssistantError(
+                f"{self.variable['name']} należy do listy read: wartość pochodzi "
+                "z PLC i nie można jej ustawić z Home Assistant"
+            )
+
         number = float(value)
 
         if not math.isfinite(number) or not (
