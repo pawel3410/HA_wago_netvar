@@ -1,9 +1,18 @@
 import logging
 
 from homeassistant.const import EntityCategory
+from homeassistant.core import callback
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_track_state_change_event
 
-from .codec import DOMAIN, MODE_READ, decode_value, variable_size
+from .codec import (
+    DOMAIN,
+    MODE_READ,
+    MODE_WRITE,
+    decode_value,
+    to_bool,
+    variable_size,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +50,9 @@ class NetVarEntity(Entity):
     """Bazowa encja dla zmiennych NetVar."""
 
     _attr_should_poll = False
+
+    # Encje sensor i binary_sensor w liście write odświeżają się po każdej zmianie zmiennej.
+    _listens_in_write = False
 
     def __init__(self, coordinator, variable):
         self.coordinator = coordinator
@@ -87,13 +99,58 @@ class NetVarEntity(Entity):
         """Rejestracja słuchacza aktualizacji po dodaniu encji (tylko tryb read)."""
         await super().async_added_to_hass()
 
-        if self.coordinator.mode == MODE_READ:
+        if self.coordinator.mode == MODE_READ or self._listens_in_write:
             self.coordinator.register_listener(self._handle_update)
+
+        # Opcja source: stan innej encji jest zapisywany do zmiennej listy write
+        source = self.variable.get("source")
+
+        if source and self.coordinator.mode == MODE_WRITE:
+            self._unsub_source = async_track_state_change_event(
+                self.hass, [source], self._handle_source_event
+            )
+            self._apply_source(self.hass.states.get(source))
 
     async def async_will_remove_from_hass(self):
         """Wyrejestrowanie słuchacza przed usunięciem encji."""
         self.coordinator.unregister_listener(self._handle_update)
+
+        unsub = getattr(self, "_unsub_source", None)
+
+        if unsub is not None:
+            unsub()
+            self._unsub_source = None
+
         await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_source_event(self, event):
+        self._apply_source(event.data.get("new_state"))
+
+    def _apply_source(self, state):
+        """Zapis stanu encji źródłowej do zmiennej (stany unknown/unavailable są pomijane)."""
+        if state is None or state.state in ("unknown", "unavailable"):
+            return
+
+        try:
+            if self.variable["type"] == "BOOL":
+                value = to_bool(state.state)
+            elif self.variable["type"] == "STRING":
+                value = str(state.state)
+            else:
+                value = float(state.state)
+
+            self.coordinator.set_variable(self.variable, value)
+        except (ValueError, TypeError, OverflowError) as err:
+            self.coordinator.warn_throttled(
+                ("source", self._variable_index),
+                "Lista %d: nie można zapisać stanu '%s' encji %s do zmiennej %s: %s",
+                self.coordinator.list_id,
+                state.state,
+                self.variable["source"],
+                self.variable["name"],
+                err,
+            )
 
     def _get_value(self, payload):
         """Wyodrębnienie wartości zmiennej z bufora listy."""
