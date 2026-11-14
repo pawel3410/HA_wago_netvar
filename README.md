@@ -208,11 +208,12 @@ Parametry niedotyczące danego trybu (np. `timeout` w liście write, `var_count`
 | name | wszystkie | Nazwa encji. |
 | unique_id | wszystkie | Identyfikator encji. Domyślnie wyznaczany z nazwy (`slug`). Można go podać ręcznie, żeby zmiana nazwy zmiennej nie tworzyła nowej encji. Powtórzony `unique_id` w obrębie listy (także dwie nazwy dające ten sam slug) jest błędem. |
 | type | wszystkie | Typ danych PLC (tabela powyżej). |
-| entity | wszystkie | `sensor`, `binary_sensor`, `switch` albo `number`. |
+| entity | wszystkie | `sensor`, `binary_sensor`, `switch` albo `number`. Każdy rodzaj działa w obu rodzajach list (tabela w sekcji „Rodzaje encji w listach read i write”). |
 | offset | wszystkie | Pozycja w buforze w bajtach. Wymagany w liście pakowanej, w niepakowanej opcjonalny (domyślnie bezpośrednio za poprzednimi zmiennymi). Alias: `byte_offset` (nazwa używana w ESPHome). |
 | index | lista niepakowana | Numer zmiennej w liście PLC. Domyślnie najmniejszy wolny numer (bez jawnych `index` jest to pozycja na liście YAML). W listach pakowanych ignorowany. |
 | length | `STRING` | Długość tekstu w znakach (1..255), domyślnie 80. |
 | format | `sensor` typu TIME, DATE, TOD, DT | `text` (domyślnie): tekst IEC, `raw`: surowa liczba. Przy `text` nie wolno podawać `device_class`, `state_class`, `unit_of_measurement`, `suggested_display_precision` ani `suggested_unit_of_measurement`. |
+| source | `sensor`, `binary_sensor` listy write | Identyfikator dowolnej encji Home Assistant (np. `sensor.temperatura_kotla`, `switch.pompa`, `input_number.nastawa`), której stan jest wysyłany do PLC. |
 | initial_value | lista write | Początkowa wartość bufora i encji. Podanie go jawnie oznacza też, że zmienna „ma wartość” od startu (patrz „Wartości początkowe i przywracanie”). |
 | restore_value | `switch`, `number` | `true`: po restarcie Home Assistant przywracany jest ostatni stan encji i wysyłany do PLC. Domyślnie `false`. |
 | require_value | lista write niepakowana | `true`: ramka tej zmiennej nie jest wysyłana, dopóki zmienna nie ma wartości. W liście pakowanej jest błędem (użyj `require_values` listy). |
@@ -232,7 +233,7 @@ Parametry niedotyczące danego trybu (np. `timeout` w liście write, `var_count`
 | suggested_unit_of_measurement | `sensor` | Sugerowana jednostka wyświetlania (Home Assistant przelicza wartość z `unit_of_measurement`, np. °C na °F). |
 | inverted | `binary_sensor`, `switch` | Odwraca wartość BOOL: dla `binary_sensor` PLC FALSE oznacza stan włączony, dla `switch` do PLC trafia negacja stanu (dotyczy też `initial_value` i `restore_value`, które opisują stan encji). |
 
-Reguły doboru encji: `BOOL` używa `binary_sensor` lub `switch`, `STRING` używa `sensor` (lista `read`) albo `number` (lista `write`), pozostałe typy `sensor` lub `number`. Lista `read` zawiera `sensor` i `binary_sensor`, a lista `write` `switch` i `number`.
+Reguły doboru encji: `BOOL` używa `binary_sensor` lub `switch`, `STRING` używa `sensor` (lista `read`) albo `number` (lista `write`), pozostałe typy `sensor` lub `number`. Lista `read` zawiera `sensor` i `binary_sensor`, a lista `write` `switch`, `number`, `sensor` i `binary_sensor` (dwie ostatnie jako zmienne tylko do wysyłki).
 
 Konfiguracja jest walidowana ściśle: nieznane pola, pola niepasujące do rodzaju encji (np. `min` w `sensor`), nakładające się offsety, powtórzone `index` i `unique_id` oraz błędne `initial_value` kończą się komunikatem o błędzie.
 
@@ -350,6 +351,80 @@ Wysyłana wartość jest konwertowana na typ zmiennej NetVar (te same reguły co
 - Wartość REAL poza zakresem float32 oraz nieskończona lub NaN są odrzucane.
 - Dla BOOL akceptowane są: `1/0`, `true/false`, `on/off`, `yes/no` (bez rozróżniania wielkości liter).
 
+### Rodzaje encji w listach `read` i `write`
+
+Każdy rodzaj encji można użyć w obu rodzajach list:
+
+| Encja | Lista `read` (wartość z PLC) | Lista `write` (wartość do PLC) |
+|-------|------------------------------|--------------------------------|
+| `sensor` | pokazuje wartość z PLC | zmienna „tylko do wysyłki”: pokazuje wysyłaną wartość, która pochodzi z `source`, `initial_value` albo z innego miejsca ustawiającego zmienną |
+| `binary_sensor` | pokazuje BOOL z PLC | jak wyżej (BOOL) |
+| `switch` | lustro BOOL z PLC; polecenia z interfejsu są odrzucane | steruje wysyłaną wartością (`restore_value`, `initial_value`) |
+| `number` | lustro wartości z PLC; polecenia z interfejsu są odrzucane | steruje wysyłaną wartością (`min`, `max`, `step`, `restore_value`, `initial_value`) |
+
+STRING: w liście `read` tylko `sensor`; w liście `write` `sensor` (wartość z `source`) albo `number` (liczba zamieniana na tekst).
+
+```yaml
+wago_netvar:
+  - ip_address: "192.168.17.45"          # lista read: switch i number jako lustro wartości z PLC
+    list_id: 150
+    mode: read
+    variables:
+      - {name: "Pompa (stan z PLC)", offset: 0, type: BOOL, entity: switch}
+      - {name: "Nastawa (z PLC)", offset: 1, type: INT, entity: number}
+
+  - ip_address: "192.168.17.45"          # lista write: encje różnych domen jako źródła
+    list_id: 151
+    mode: write
+    on_change: true
+    variables:
+      - {name: "Nastawa z input_number", offset: 0, type: INT, entity: sensor, source: input_number.nastawa}
+      - {name: "Pompa z przełącznika", offset: 2, type: BOOL, entity: binary_sensor, source: switch.pompa}
+      - {name: "Komunikat", offset: 3, type: STRING, length: 16, entity: sensor, source: input_text.komunikat}
+```
+
+W liście `read` `switch` i `number` nie sterują niczym: próba ustawienia z interfejsu kończy się błędem „należy do listy read”, a stan zawsze pochodzi z PLC. Dla takich encji `source`, `initial_value`, `restore_value` i `require_value` są błędem konfiguracji.
+
+### Zmienne tylko do wysyłki (`sensor` i `binary_sensor` w liście `write`)
+
+W liście `write` można użyć `entity: sensor` (zmienne liczbowe) albo `entity: binary_sensor` (BOOL). Taka zmienna nie ma sterowania w interfejsie: encja jest tylko podglądem wartości, która jest wysyłana do PLC. Wartość pochodzi z:
+
+- opcji `source`: identyfikatora innej encji Home Assistant (np. `sensor.temperatura_kotla`). Każda zmiana stanu tej encji jest zapisywana do zmiennej i wysyłana zgodnie z `on_change` i `update_interval`. Stan encji źródłowej w chwili dodania zmiennej jest odczytywany od razu. Stany `unknown`, `unavailable` i wartości, których nie da się zamienić na liczbę, są pomijane (ostrzeżenie w logu), a zmienna zachowuje poprzednią wartość,
+- `initial_value`: stałej wartości początkowej,
+- innej encji lub automatyzacji ustawiającej zmienną.
+
+```yaml
+wago_netvar:
+  - ip_address: "192.168.17.45"
+    list_id: 124
+    mode: write
+    on_change: true
+    update_interval: 30s
+    variables:
+      - name: "Temperatura kotła"
+        unique_id: temp_kotla
+        offset: 0
+        type: REAL
+        entity: sensor
+        source: sensor.temperatura_kotla     # encja Home Assistant
+        unit_of_measurement: "°C"
+        device_class: temperature
+      - name: "Pompa włączona"
+        offset: 4
+        type: BOOL
+        entity: binary_sensor
+        source: binary_sensor.pompa
+```
+
+Zasady:
+
+- `source` dotyczy tylko `sensor` i `binary_sensor` w liście `write` (w liście `read` jest błędem). `number` i `switch` listy `write` sterujesz z interfejsu.
+- Źródłem może być encja dowolnej domeny (`sensor`, `number`, `input_number`, `switch`, `input_boolean`, `binary_sensor`, `input_text`...). Stan jest zamieniany zależnie od typu zmiennej: BOOL (`on`/`off`, `true`/`false`, `1`/`0`, `yes`/`no`), liczba, albo tekst dla STRING (ucinany do `length`, ostrzeżenie w logu). Zmienna STRING w liście `write` może więc być `sensor` ze `source` (albo `number`, którego liczba jest zamieniana na tekst).
+- Dla `binary_sensor` stany `on`/`off` (a także `true`/`false`, `1`/`0`, `yes`/`no`) są zamieniane na BOOL; `inverted: true` odwraca wartość wysyłaną do PLC, a encja pokazuje stan logiczny.
+- Wartości liczbowe są konwertowane jak przy każdym zapisie (zaokrąglenie do typu całkowitego, ucięcie przy przepełnieniu).
+- `require_value: true` (lista niepakowana) i `require_values` (lista pakowana) działają także dla tych zmiennych: do czasu pierwszego odczytu `source` zmienna uchodzi za pozbawioną wartości.
+- `restore_value` nie dotyczy `sensor` i `binary_sensor` (po restarcie wartość wraca ze `source`).
+
 ### Wartości początkowe i przywracanie
 
 Dla zmiennych sterowanych encją `switch` lub `number`:
@@ -402,6 +477,8 @@ Konfiguracja listy i zmiennych (nazwy, domyślne wartości, reguły) jest taka s
 | Obszar | Home Assistant | ESPHome |
 |--------|----------------|---------|
 | Identyfikator listy | brak | opcjonalne `id` (do lambd i akcji) |
+| Źródło wartości zmiennej `sensor`/`binary_sensor` listy write (`source`) | identyfikator dowolnej encji Home Assistant, np. `sensor.temperatura_kotla`, `switch.pompa`, `input_number.nastawa` | `id` encji ESPHome (`sensor`, `number`, `binary_sensor`, `switch`, `text_sensor`; inny rodzaj jawnie: `{number: id}`) |
+| Polecenie z interfejsu do `switch`/`number` listy read | błąd „należy do listy read” | encja wraca do wartości z PLC (ostrzeżenie w logu) |
 | Dodatkowe parametry encji | `visible_by_default`, `suggested_unit_of_measurement` | cały schemat encji ESPHome (`filters`, `on_value`, `internal`, `web_server`, ...) |
 | Wysyłka na żądanie | usługa `wago_netvar.send_list` | akcja `wago_netvar.send` lub `send_now()` |
 | Przywracanie stanu | `RestoreEntity` Home Assistant | pamięć nieulotna ESPHome (klucz: `unique_id`) |
@@ -427,6 +504,15 @@ Konfiguracja listy i zmiennych (nazwy, domyślne wartości, reguły) jest taka s
 - Zliczanie `rejected_packets` zgodne z wersją ESPHome (ramki o nieobsługiwanym `list_id`, z niewłaściwego adresu nadawcy lub niezidentyfikowane są teraz zliczane, wcześniej były ignorowane). Ramka jest dekodowana przez każdą pasującą listę, a nie tylko jedną.
 - Lista `read` z `ip_address: 255.255.255.255` jest błędem (adres nadawcy).
 - Usunięto wycofaną opcję `transmit_checksum` (jej użycie jest teraz błędem „nieznane pole”).
+
+## Zmiany w wersji 1.7.0
+
+- **Wszystkie rodzaje encji w obu rodzajach list:** `switch` i `number` są dozwolone w liście `read` (lustro wartości z PLC, ustawianie z interfejsu kończy się błędem), a `sensor` i `binary_sensor` w liście `write`. STRING w liście `write` może być `sensor` ze `source` (tekst ze stanu encji źródłowej); w liście `read` STRING wymaga `sensor`. Zmiana dotyczy także komponentu ESPHome, w którym `source` przyjmuje dodatkowo `number`, `switch` i `text_sensor`.
+
+## Zmiany w wersji 1.6.0
+
+- `sensor` i `binary_sensor` są dozwolone w liście `write` jako zmienne tylko do wysyłki, z opcją `source` (encja Home Assistant, której stan jest wysyłany). Encje te odświeżają się po każdej zmianie wartości zmiennej. Zmiana dotyczy także komponentu ESPHome (konfiguracja pozostaje jednakowa).
+- Uściślone reguły: `source`, `require_value` i `initial_value` dotyczą list `write`.
 
 ## Zmiany w wersji 1.5.0
 
