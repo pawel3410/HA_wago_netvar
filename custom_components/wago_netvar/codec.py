@@ -70,8 +70,13 @@ TYPE_ALIASES = {
     "DATE_AND_TIME": "DT",
 }
 
-READ_ENTITIES = ("sensor", "binary_sensor")
-WRITE_ENTITIES = ("switch", "number")
+# Każdy rodzaj encji działa w obu rodzajach list:
+# - lista read: encja pokazuje wartość odebraną z PLC (switch i number są tylko lustrem wartości: sterowanie
+#   z interfejsu jest odrzucane),
+# - lista write: switch i number sterują wysyłaną wartością, a sensor i binary_sensor są zmiennymi "tylko do
+#   wysyłki" (wartość z opcji source, z initial_value albo z innej encji ustawiającej zmienną).
+READ_ENTITIES = ("sensor", "binary_sensor", "switch", "number")
+WRITE_ENTITIES = ("sensor", "binary_sensor", "switch", "number")
 
 ENTITY_CATEGORIES = ("config", "diagnostic")
 
