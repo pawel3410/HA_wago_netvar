@@ -6,7 +6,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .codec import to_bool
+from .codec import MODE_READ, to_bool
 from .entity import NetVarEntity, add_platform_entities
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,23 +23,33 @@ async def async_setup_platform(
 
 
 class NetVarSwitch(NetVarEntity, SwitchEntity, RestoreEntity):
-    """Przełącznik NetVar (stan optymistyczny: PLC nie potwierdza zapisu).
+    """Przełącznik NetVar.
 
-    restore_value: po restarcie przywracany jest ostatni stan i wysyłany do PLC.
+    Lista write: steruje wysyłaną wartością (stan optymistyczny: PLC nie potwierdza zapisu);
+    restore_value przywraca po restarcie ostatni stan i wysyła go do PLC.
+    Lista read: pokazuje wartość BOOL odebraną z PLC, sterowanie z interfejsu jest odrzucane.
     """
-
-    _attr_assumed_state = True
 
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
 
+        self._read_only = coordinator.mode == MODE_READ
+        self._attr_assumed_state = not self._read_only
         self._attr_device_class = variable.get("device_class")
-        self._attr_is_on = to_bool(variable.get("initial_value", False))
+        self._attr_is_on = (
+            None
+            if self._read_only
+            else to_bool(variable.get("initial_value", False))
+        )
+
+    def _update_value(self, value):
+        # inverted: PLC FALSE oznacza stan włączony encji
+        self._attr_is_on = bool(value) != bool(self.variable.get("inverted"))
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
 
-        if not self.variable.get("restore_value"):
+        if self._read_only or not self.variable.get("restore_value"):
             return
 
         last = await self.async_get_last_state()
@@ -54,6 +64,12 @@ class NetVarSwitch(NetVarEntity, SwitchEntity, RestoreEntity):
         self.coordinator.schedule_startup_send()
 
     async def _async_set(self, state):
+        if self._read_only:
+            raise HomeAssistantError(
+                f"{self.variable['name']} należy do listy read: wartość pochodzi "
+                "z PLC i nie można jej ustawić z Home Assistant"
+            )
+
         try:
             self.coordinator.set_variable(self.variable, state)
         except (ValueError, OSError) as err:
