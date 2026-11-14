@@ -18,7 +18,9 @@ async def async_setup_platform(
 
 
 class NetVarBinarySensor(NetVarEntity, BinarySensorEntity):
-    """Czujnik binarny NetVar."""
+    """Czujnik binarny NetVar (lista read: odczyt z PLC; lista write: wysyłana wartość)."""
+
+    _listens_in_write = True
 
     def __init__(self, coordinator, variable):
         super().__init__(coordinator, variable)
